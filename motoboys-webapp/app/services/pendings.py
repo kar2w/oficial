@@ -35,7 +35,6 @@ def assign_ride(db: Session, ride_id: str, courier_id: str, pay_in_current_week:
             note=f"Corrida atribuída tardiamente (origem week_id={ride.week_id})",
         )
         db.add(le)
-        ride.paid_in_week_id = current.id
 
     db.commit()
     return ride
@@ -83,6 +82,8 @@ def resolve_yooga(db: Session, group_id: str, action: str, keep_ride_id: str | N
     if action == "KEEP_ONE":
         if not keep_ride_id:
             raise HTTPException(status_code=400, detail="keep_ride_id required")
+        if not any(str(r.id) == keep_ride_id for r in rides):
+            raise HTTPException(status_code=400, detail="keep_ride_id does not belong to this group")
         for r in rides:
             if str(r.id) == keep_ride_id:
                 if r.courier_id is not None:
