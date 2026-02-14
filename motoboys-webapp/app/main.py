@@ -28,7 +28,7 @@ from app.services.couriers import add_alias, create_courier, delete_alias, list_
 from app.services.import_saipos import import_saipos
 from app.services.import_yooga import import_yooga
 from app.services.ledger import create_ledger_entry, delete_ledger_entry, list_week_ledger
-from app.services.payouts import close_week, compute_week_payout_preview, get_payout_snapshot, pay_week
+from app.services.payouts import close_week, compute_week_payout_preview, get_payout_snapshot, get_week_or_404, pay_week
 from app.services.pendings import assign_ride, list_assignment, list_yooga_groups, resolve_yooga, yooga_group_items
 from app.services.seed import seed_weekly_couriers
 from app.services.utils import read_upload_bytes, sha256_bytes
@@ -211,6 +211,83 @@ def week_payout_snapshot(week_id: str, db: Session = Depends(get_db)):
         )
         for r in rows
     ]
+
+
+@app.get("/weeks/{week_id}/payouts.csv")
+def week_payout_csv(week_id: str, db: Session = Depends(get_db)):
+    import csv
+    import io
+
+    w = get_week_or_404(db, week_id)
+    if w["status"] in ("CLOSED", "PAID"):
+        rows = get_payout_snapshot(db, week_id)
+        header = [
+            "courier_nome",
+            "courier_id",
+            "rides_amount",
+            "extras_amount",
+            "vales_amount",
+            "installments_amount",
+            "net_amount",
+            "pending_count",
+            "computed_at",
+            "paid_at",
+        ]
+        data_rows = [
+            {
+                "courier_nome": r["courier_nome"],
+                "courier_id": r["courier_id"],
+                "rides_amount": r["rides_amount"],
+                "extras_amount": r["extras_amount"],
+                "vales_amount": r["vales_amount"],
+                "installments_amount": r["installments_amount"],
+                "net_amount": r["net_amount"],
+                "pending_count": r["pending_count"],
+                "computed_at": r.get("computed_at"),
+                "paid_at": r.get("paid_at"),
+            }
+            for r in rows
+        ]
+    else:
+        rows = compute_week_payout_preview(db, week_id)
+        header = [
+            "courier_nome",
+            "courier_id",
+            "rides_count",
+            "rides_amount",
+            "extras_amount",
+            "vales_amount",
+            "installments_amount",
+            "net_amount",
+            "pending_count",
+        ]
+        data_rows = [
+            {
+                "courier_nome": r.get("courier_nome"),
+                "courier_id": str(r.get("courier_id")) if r.get("courier_id") is not None else "",
+                "rides_count": r.get("rides_count"),
+                "rides_amount": r.get("rides_amount"),
+                "extras_amount": r.get("extras_amount"),
+                "vales_amount": r.get("vales_amount"),
+                "installments_amount": r.get("installments_amount"),
+                "net_amount": r.get("net_amount"),
+                "pending_count": r.get("pending_count"),
+            }
+            for r in rows
+        ]
+
+    buf = io.StringIO()
+    wr = csv.DictWriter(buf, fieldnames=header)
+    wr.writeheader()
+    for row in data_rows:
+        wr.writerow(row)
+
+    filename = f"week_{w['start_date']}_to_{w['end_date']}_payouts.csv"
+    return Response(
+        content=buf.getvalue(),
+        media_type="text/csv",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
 
 
 @app.get("/weeks/{week_id}/ledger", response_model=list[LedgerEntryOut])
