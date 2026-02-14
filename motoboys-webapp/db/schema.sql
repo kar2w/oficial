@@ -1,2 +1,10 @@
--- Initial SQL schema placeholder for motoboys-webapp.
--- Add DDL statements for tables, enums, indexes and constraints.
+-- Este arquivo não é o schema oficial.
+--
+-- Fonte única de verdade:
+--   ../db/schema.sql (na raiz do repositório)
+--
+-- Para aplicar manualmente a partir da raiz:
+--   docker exec -i motoboys-db psql -U postgres -d motoboys < ./db/schema.sql
+--
+-- Este arquivo existe apenas para evitar ambiguidade para quem procurar schema dentro de
+-- motoboys-webapp. Não adicione DDL aqui.
