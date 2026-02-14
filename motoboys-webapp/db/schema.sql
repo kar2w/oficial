@@ -1,0 +1,2 @@
+-- Initial SQL schema placeholder for motoboys-webapp.
+-- Add DDL statements for tables, enums, indexes and constraints.
