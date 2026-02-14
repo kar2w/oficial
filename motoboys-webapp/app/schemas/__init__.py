@@ -1,5 +1,5 @@
 from datetime import date, datetime
-from typing import Literal
+from typing import Literal, Optional
 
 from pydantic import BaseModel, Field
 
@@ -23,26 +23,37 @@ class ResolveYoogaBody(BaseModel):
     keep_ride_id: str | None = None
 
 
+class SeedCourierPayment(BaseModel):
+    chave: Optional[str] = None
+    banco: Optional[str] = None
+
+
+class SeedCourier(BaseModel):
+    nome_exibicao: str
+    nome_completo: Optional[str] = None
+    pagamento: Optional[SeedCourierPayment] = None
+
+
 class SeedRequest(BaseModel):
-    items: list[dict] = []
+    entregadores: list[SeedCourier]
 
 
-class CourierCreate(BaseModel):
-    nome_resumido: str
-    nome_completo: str | None = None
-    categoria: str
-    active: bool = True
+CourierCategoryLiteral = Literal["SEMANAL", "DIARISTA"]
+PaymentKeyTypeLiteral = Literal["CPF", "CNPJ", "TELEFONE", "EMAIL", "ALEATORIA", "OUTRO"]
 
 
-class CourierPatch(BaseModel):
-    nome_resumido: str | None = None
-    nome_completo: str | None = None
-    categoria: str | None = None
-    active: bool | None = None
+class CourierPaymentIn(BaseModel):
+    key_type: Optional[PaymentKeyTypeLiteral] = None
+    key_value_raw: Optional[str] = None
+    bank: Optional[str] = None
+
+
+class CourierPaymentOut(CourierPaymentIn):
+    courier_id: str
 
 
 class CourierAliasCreate(BaseModel):
-    alias_raw: str
+    alias_raw: str = Field(..., min_length=1)
 
 
 class CourierAliasOut(BaseModel):
@@ -52,26 +63,27 @@ class CourierAliasOut(BaseModel):
     alias_norm: str
 
 
-class CourierPaymentIn(BaseModel):
-    key_type: str
-    key_value_raw: str
-    bank: str | None = None
+class CourierCreate(BaseModel):
+    nome_resumido: str = Field(..., min_length=1)
+    nome_completo: Optional[str] = None
+    categoria: CourierCategoryLiteral = "DIARISTA"
+    active: bool = True
 
 
-class CourierPaymentOut(BaseModel):
-    courier_id: str
-    key_type: str
-    key_value_raw: str
-    bank: str | None = None
+class CourierPatch(BaseModel):
+    nome_resumido: Optional[str] = Field(default=None, min_length=1)
+    nome_completo: Optional[str] = None
+    categoria: Optional[CourierCategoryLiteral] = None
+    active: Optional[bool] = None
 
 
 class CourierOut(BaseModel):
     id: str
     nome_resumido: str
-    nome_completo: str | None = None
-    categoria: str
+    nome_completo: Optional[str]
+    categoria: CourierCategoryLiteral
     active: bool
-    payment: CourierPaymentOut | None = None
+    payment: Optional[CourierPaymentOut] = None
     aliases: list[CourierAliasOut] = []
 
 
