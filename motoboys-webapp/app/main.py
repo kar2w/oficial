@@ -33,12 +33,13 @@ from app.services.pendings import assign_ride, list_assignment, list_yooga_group
 from app.services.seed import seed_weekly_couriers
 from app.services.utils import read_upload_bytes, sha256_bytes
 from app.services.week_service import get_current_week
+from app.settings import settings
 
 app = FastAPI(title="Motoboys WebApp API")
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=settings.cors_origins_list,
     allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
