@@ -1,128 +1,151 @@
 import datetime as dt
-from typing import Any
+from typing import Any, Dict, List, Optional
 
 from fastapi import HTTPException
-from sqlalchemy import text as sa_text
+from sqlalchemy import and_, or_, func, case
 from sqlalchemy.orm import Session
 
+from app.models import Week, Ride, LedgerEntry, Courier, WeekPayout
 
-_PENDING_STATUSES = ("PENDENTE_ATRIBUICAO", "PENDENTE_REVISAO", "PENDENTE_MATCH")
+
+_PENDING_STATUSES = {"PENDENTE_ATRIBUICAO", "PENDENTE_REVISAO", "PENDENTE_MATCH"}
 
 
-def get_week_or_404(db: Session, week_id: str):
-    w = db.execute(
-        sa_text("SELECT id, start_date, end_date, status FROM weeks WHERE id::text = :week_id"),
-        {"week_id": week_id},
-    ).mappings().first()
+def get_week_or_404(db: Session, week_id: str) -> Week:
+    w = db.query(Week).filter(Week.id == week_id).first()
     if not w:
         raise HTTPException(status_code=404, detail="week not found")
     return w
 
 
-def compute_week_payout_preview(db: Session, week_id: str) -> list[dict[str, Any]]:
+def _scope_filter(week_id: str):
+    # Paid-in-week overrides original week_id.
+    return or_(
+        and_(Ride.week_id == week_id, Ride.paid_in_week_id.is_(None)),
+        Ride.paid_in_week_id == week_id,
+    )
+
+
+def compute_week_payout_preview(db: Session, week_id: str) -> List[Dict[str, Any]]:
+    """Compute payouts for a week without writing snapshot.
+
+    Amounts use Ride.fee_type (6/10) as the payable value, not value_raw.
+    """
     w = get_week_or_404(db, week_id)
+    scope = _scope_filter(week_id)
 
-    rows = db.execute(
-        sa_text(
-            """
-            WITH ride_scope AS (
-                SELECT r.*
-                FROM rides r
-                WHERE (r.week_id::text = :week_id AND r.paid_in_week_id IS NULL)
-                   OR r.paid_in_week_id::text = :week_id
-            ),
-            ok AS (
-                SELECT
-                    courier_id,
-                    COUNT(*) AS rides_count,
-                    COALESCE(SUM(fee_type), 0) AS rides_amount,
-                    COALESCE(SUM(value_raw), 0) AS rides_value_raw_amount
-                FROM ride_scope
-                WHERE status = 'OK'
-                  AND (is_cancelled IS NULL OR is_cancelled = false)
-                GROUP BY courier_id
-            ),
-            pend AS (
-                SELECT
-                    courier_id,
-                    COUNT(*) AS pending_count
-                FROM ride_scope
-                WHERE status = ANY(:pending_statuses)
-                  AND (is_cancelled IS NULL OR is_cancelled = false)
-                GROUP BY courier_id
-            ),
-            led AS (
-                SELECT
-                    courier_id,
-                    COALESCE(SUM(CASE WHEN type = 'EXTRA' THEN amount ELSE 0 END), 0) AS extras_amount,
-                    COALESCE(SUM(CASE WHEN type = 'VALE' THEN amount ELSE 0 END), 0) AS vales_amount
-                FROM ledger_entries
-                WHERE week_id::text = :week_id
-                GROUP BY courier_id
-            ),
-            all_ids AS (
-                SELECT courier_id FROM ok
-                UNION
-                SELECT courier_id FROM pend
-                UNION
-                SELECT courier_id FROM led
-            )
-            SELECT
-                :week_id AS week_id,
-                ai.courier_id,
-                c.nome_resumido AS courier_nome,
-                COALESCE(ok.rides_count, 0) AS rides_count,
-                COALESCE(ok.rides_amount, 0) AS rides_amount,
-                COALESCE(ok.rides_value_raw_amount, 0) AS rides_value_raw_amount,
-                COALESCE(led.extras_amount, 0) AS extras_amount,
-                COALESCE(led.vales_amount, 0) AS vales_amount,
-                0::numeric AS installments_amount,
-                COALESCE(pend.pending_count, 0) AS pending_count
-            FROM all_ids ai
-            LEFT JOIN ok ON ok.courier_id IS NOT DISTINCT FROM ai.courier_id
-            LEFT JOIN pend ON pend.courier_id IS NOT DISTINCT FROM ai.courier_id
-            LEFT JOIN led ON led.courier_id IS NOT DISTINCT FROM ai.courier_id
-            LEFT JOIN couriers c ON c.id = ai.courier_id
-            ORDER BY UPPER(COALESCE(c.nome_resumido, '<SEM ATRIBUIÇÃO>'))
-            """
-        ),
-        {"week_id": str(w["id"]), "pending_statuses": list(_PENDING_STATUSES)},
-    ).mappings().all()
+    not_cancelled = or_(Ride.is_cancelled.is_(None), Ride.is_cancelled == False)  # noqa: E712
 
-    out: list[dict[str, Any]] = []
-    for r in rows:
-        rides_amount = float(r["rides_amount"] or 0)
-        extras_amount = float(r["extras_amount"] or 0)
-        vales_amount = float(r["vales_amount"] or 0)
-        installments_amount = float(r["installments_amount"] or 0)
-        out.append(
-            {
-                "week_id": str(r["week_id"]),
-                "courier_id": r["courier_id"],
-                "courier_nome": r["courier_nome"] or "<SEM ATRIBUIÇÃO>",
-                "rides_count": int(r["rides_count"] or 0),
-                "rides_amount": rides_amount,
-                "rides_value_raw_amount": float(r["rides_value_raw_amount"] or 0),
-                "extras_amount": extras_amount,
-                "vales_amount": vales_amount,
-                "installments_amount": installments_amount,
-                "pending_count": int(r["pending_count"] or 0),
-                "net_amount": rides_amount + extras_amount - vales_amount - installments_amount,
-                "is_flag_red": False,
-            }
+    ok_rows = (
+        db.query(
+            Ride.courier_id.label("courier_id"),
+            func.count(Ride.id).label("rides_count"),
+            func.coalesce(func.sum(Ride.fee_type), 0).label("rides_amount"),
+            func.coalesce(func.sum(Ride.value_raw), 0).label("rides_value_raw_amount"),
         )
+        .filter(scope, Ride.status == "OK", not_cancelled)
+        .group_by(Ride.courier_id)
+        .all()
+    )
 
+    pending_rows = (
+        db.query(Ride.courier_id.label("courier_id"), func.count(Ride.id).label("pending_count"))
+        .filter(scope, Ride.status.in_(sorted(_PENDING_STATUSES)), not_cancelled)
+        .group_by(Ride.courier_id)
+        .all()
+    )
+
+    ledger_rows = (
+        db.query(
+            LedgerEntry.courier_id.label("courier_id"),
+            func.coalesce(func.sum(case((LedgerEntry.type == "EXTRA", LedgerEntry.amount), else_=0)), 0).label(
+                "extras_amount"
+            ),
+            func.coalesce(func.sum(case((LedgerEntry.type == "VALE", LedgerEntry.amount), else_=0)), 0).label(
+                "vales_amount"
+            ),
+        )
+        .filter(LedgerEntry.week_id == week_id)
+        .group_by(LedgerEntry.courier_id)
+        .all()
+    )
+
+    by_id: Dict[Optional[object], Dict[str, Any]] = {}
+
+    def ensure(cid):
+        if cid not in by_id:
+            by_id[cid] = {
+                "week_id": str(w.id),
+                "courier_id": cid,
+                "courier_nome": None,
+                "rides_count": 0,
+                "rides_amount": 0.0,
+                "rides_value_raw_amount": 0.0,
+                "extras_amount": 0.0,
+                "vales_amount": 0.0,
+                "installments_amount": 0.0,
+                "pending_count": 0,
+            }
+        return by_id[cid]
+
+    for r in ok_rows:
+        row = ensure(r.courier_id)
+        row["rides_count"] = int(r.rides_count or 0)
+        row["rides_amount"] = float(r.rides_amount or 0)
+        row["rides_value_raw_amount"] = float(r.rides_value_raw_amount or 0)
+
+    for r in pending_rows:
+        row = ensure(r.courier_id)
+        row["pending_count"] = int(r.pending_count or 0)
+
+    for r in ledger_rows:
+        row = ensure(r.courier_id)
+        row["extras_amount"] = float(r.extras_amount or 0)
+        row["vales_amount"] = float(r.vales_amount or 0)
+
+    # Attach courier names
+    courier_ids = [cid for cid in by_id.keys() if cid is not None]
+    if courier_ids:
+        couriers = db.query(Courier.id, Courier.nome_resumido).filter(Courier.id.in_(courier_ids)).all()
+        names = {cid: nome for cid, nome in couriers}
+        for cid in courier_ids:
+            by_id[cid]["courier_nome"] = names.get(cid)
+
+    # Compute net
+    out = []
+    for cid, row in by_id.items():
+        rides_amount = float(row["rides_amount"])
+        extras_amount = float(row["extras_amount"])
+        vales_amount = float(row["vales_amount"])
+        installments_amount = float(row["installments_amount"])
+
+        net = rides_amount + extras_amount - vales_amount - installments_amount
+        row["net_amount"] = float(net)
+
+        # In v1: no loans yet. Flag red reserved for future.
+        row["is_flag_red"] = False
+
+        if cid is None:
+            row["courier_nome"] = row["courier_nome"] or "<SEM ATRIBUIÇÃO>"
+        out.append(row)
+
+    def sort_key(x):
+        return (x["courier_nome"] or "").upper()
+
+    out.sort(key=sort_key)
     return out
 
 
-def close_week(db: Session, week_id: str) -> dict[str, Any]:
+def close_week(db: Session, week_id: str) -> Dict[str, Any]:
     w = get_week_or_404(db, week_id)
-    if w["status"] != "OPEN":
-        raise HTTPException(status_code=409, detail={"error": "WEEK_NOT_OPEN", "status": w["status"]})
+    if w.status != "OPEN":
+        raise HTTPException(status_code=409, detail={"error": "WEEK_NOT_OPEN", "status": w.status})
 
     rows = compute_week_payout_preview(db, week_id)
+
     pending_total = sum(int(r.get("pending_count") or 0) for r in rows)
-    unassigned = [r for r in rows if r.get("courier_id") is None and int(r.get("rides_count") or 0) > 0]
+    unassigned = [r for r in rows if r.get("courier_id") is None and (r.get("rides_count") or 0) > 0]
+
     if pending_total > 0 or unassigned:
         raise HTTPException(
             status_code=409,
@@ -133,95 +156,76 @@ def close_week(db: Session, week_id: str) -> dict[str, Any]:
             },
         )
 
-    db.execute(sa_text("DELETE FROM week_payouts WHERE week_id::text = :week_id"), {"week_id": week_id})
+    # Replace snapshot
+    db.query(WeekPayout).filter(WeekPayout.week_id == w.id).delete(synchronize_session=False)
+
     for r in rows:
-        if r.get("courier_id") is None:
+        cid = r.get("courier_id")
+        if cid is None:
             continue
-        db.execute(
-            sa_text(
-                """
-                INSERT INTO week_payouts (
-                    week_id, courier_id, rides_amount, extras_amount, vales_amount,
-                    installments_amount, net_amount, pending_count, is_flag_red
-                ) VALUES (
-                    :week_id, :courier_id, :rides_amount, :extras_amount, :vales_amount,
-                    :installments_amount, :net_amount, :pending_count, :is_flag_red
-                )
-                """
-            ),
-            {
-                "week_id": week_id,
-                "courier_id": str(r["courier_id"]),
-                "rides_amount": r["rides_amount"],
-                "extras_amount": r["extras_amount"],
-                "vales_amount": r["vales_amount"],
-                "installments_amount": r["installments_amount"],
-                "net_amount": r["net_amount"],
-                "pending_count": r["pending_count"],
-                "is_flag_red": False,
-            },
+        db.add(
+            WeekPayout(
+                week_id=w.id,
+                courier_id=cid,
+                rides_amount=r["rides_amount"],
+                extras_amount=r["extras_amount"],
+                vales_amount=r["vales_amount"],
+                installments_amount=r["installments_amount"],
+                net_amount=r["net_amount"],
+                pending_count=r["pending_count"],
+                is_flag_red=False,
+            )
         )
 
-    db.execute(sa_text("UPDATE weeks SET status = 'CLOSED' WHERE id::text = :week_id"), {"week_id": week_id})
+    w.status = "CLOSED"
     db.commit()
-    return {"ok": True, "week_id": str(w["id"]), "status": "CLOSED", "payouts": len(rows)}
+
+    return {"ok": True, "week_id": str(w.id), "status": w.status, "payouts": len(rows)}
 
 
-def pay_week(db: Session, week_id: str) -> dict[str, Any]:
+def pay_week(db: Session, week_id: str) -> Dict[str, Any]:
     w = get_week_or_404(db, week_id)
-    if w["status"] != "CLOSED":
-        raise HTTPException(status_code=409, detail={"error": "WEEK_NOT_CLOSED", "status": w["status"]})
+    if w.status != "CLOSED":
+        raise HTTPException(status_code=409, detail={"error": "WEEK_NOT_CLOSED", "status": w.status})
 
     now = dt.datetime.now(dt.timezone.utc)
-    db.execute(sa_text("UPDATE weeks SET status = 'PAID' WHERE id::text = :week_id"), {"week_id": week_id})
-    db.execute(
-        sa_text("UPDATE week_payouts SET paid_at = :paid_at WHERE week_id::text = :week_id"),
-        {"week_id": week_id, "paid_at": now},
-    )
+
+    w.status = "PAID"
+    db.query(WeekPayout).filter(WeekPayout.week_id == w.id).update({WeekPayout.paid_at: now})
     db.commit()
-    return {"ok": True, "week_id": str(w["id"]), "status": "PAID", "paid_at": now.isoformat()}
+
+    return {"ok": True, "week_id": str(w.id), "status": w.status, "paid_at": now.isoformat()}
 
 
-def get_payout_snapshot(db: Session, week_id: str) -> list[dict[str, Any]]:
+def get_payout_snapshot(db: Session, week_id: str) -> List[Dict[str, Any]]:
     w = get_week_or_404(db, week_id)
-    rows = db.execute(
-        sa_text(
-            """
-            SELECT
-                wp.courier_id,
-                c.nome_resumido AS courier_nome,
-                wp.rides_amount,
-                wp.extras_amount,
-                wp.vales_amount,
-                wp.installments_amount,
-                wp.net_amount,
-                wp.pending_count,
-                wp.is_flag_red,
-                wp.computed_at,
-                wp.paid_at
-            FROM week_payouts wp
-            JOIN couriers c ON c.id = wp.courier_id
-            WHERE wp.week_id::text = :week_id
-            ORDER BY c.nome_resumido ASC
-            """
-        ),
-        {"week_id": str(w["id"])},
-    ).mappings().all()
+    rows = (
+        db.query(
+            WeekPayout,
+            Courier.nome_resumido.label("courier_nome"),
+        )
+        .join(Courier, Courier.id == WeekPayout.courier_id)
+        .filter(WeekPayout.week_id == w.id)
+        .order_by(Courier.nome_resumido.asc())
+        .all()
+    )
 
-    return [
-        {
-            "week_id": str(w["id"]),
-            "courier_id": str(r["courier_id"]),
-            "courier_nome": r["courier_nome"],
-            "rides_amount": float(r["rides_amount"]),
-            "extras_amount": float(r["extras_amount"]),
-            "vales_amount": float(r["vales_amount"]),
-            "installments_amount": float(r["installments_amount"]),
-            "net_amount": float(r["net_amount"]),
-            "pending_count": int(r["pending_count"]),
-            "is_flag_red": bool(r["is_flag_red"]),
-            "computed_at": r["computed_at"].isoformat() if r["computed_at"] else None,
-            "paid_at": r["paid_at"].isoformat() if r["paid_at"] else None,
-        }
-        for r in rows
-    ]
+    out: List[Dict[str, Any]] = []
+    for wp, nome in rows:
+        out.append(
+            {
+                "week_id": str(w.id),
+                "courier_id": str(wp.courier_id),
+                "courier_nome": nome,
+                "rides_amount": float(wp.rides_amount),
+                "extras_amount": float(wp.extras_amount),
+                "vales_amount": float(wp.vales_amount),
+                "installments_amount": float(wp.installments_amount),
+                "net_amount": float(wp.net_amount),
+                "pending_count": int(wp.pending_count),
+                "is_flag_red": bool(wp.is_flag_red),
+                "computed_at": wp.computed_at.isoformat() if wp.computed_at else None,
+                "paid_at": wp.paid_at.isoformat() if wp.paid_at else None,
+            }
+        )
+    return out

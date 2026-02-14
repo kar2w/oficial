@@ -4,8 +4,8 @@ import re
 from typing import Optional
 
 from fastapi import HTTPException
-from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
+from sqlalchemy.exc import IntegrityError
 
 from app.models import Courier, CourierAlias, CourierPayment
 from app.services.courier_match import norm_text
@@ -51,6 +51,7 @@ def list_couriers(
     if categoria:
         qry = qry.filter(Courier.categoria == categoria)
     if q:
+        # simple case-insensitive contains
         like = f"%{q.strip()}%"
         qry = qry.filter(Courier.nome_resumido.ilike(like))
     return qry.order_by(Courier.nome_resumido.asc()).all()
@@ -61,12 +62,13 @@ def create_courier(db: Session, *, nome_resumido: str, nome_completo: str | None
     if not nome_resumido:
         raise HTTPException(status_code=400, detail="nome_resumido is required")
 
+    # default alias based on nome_resumido
     an = _alias_norm(nome_resumido)
     ensure_alias_not_used_by_other_courier(db, an, courier_id=None)
 
     c = Courier(nome_resumido=nome_resumido, nome_completo=nome_completo, categoria=categoria, active=active)
     db.add(c)
-    db.flush()
+    db.flush()  # get id without committing yet
 
     a = CourierAlias(courier_id=c.id, alias_raw=nome_resumido, alias_norm=an)
     db.add(a)
@@ -88,33 +90,27 @@ def patch_courier(db: Session, courier_id: str, *, nome_resumido=None, nome_comp
         nn = (nome_resumido or "").strip()
         if not nn:
             raise HTTPException(status_code=400, detail="nome_resumido cannot be empty")
+        # do not allow default alias collision
         an = _alias_norm(nn)
         ensure_alias_not_used_by_other_courier(db, an, courier_id=str(c.id))
         c.nome_resumido = nn
-        existing = (
-            db.query(CourierAlias)
-            .filter(
-                CourierAlias.courier_id == c.id,
-                CourierAlias.alias_norm == an,
-            )
-            .first()
-        )
+        # ensure alias exists for the new display name
+        existing = db.query(CourierAlias).filter(
+            CourierAlias.courier_id == c.id,
+            CourierAlias.alias_norm == an,
+        ).first()
         if not existing:
             db.add(CourierAlias(courier_id=c.id, alias_raw=nn, alias_norm=an))
 
     if nome_completo is not None:
-        c.nome_completo = nome_completo.strip() if isinstance(nome_completo, str) else None
+        c.nome_completo = (nome_completo.strip() if isinstance(nome_completo, str) else None)
         if c.nome_completo:
             an = _alias_norm(c.nome_completo)
             ensure_alias_not_used_by_other_courier(db, an, courier_id=str(c.id))
-            existing = (
-                db.query(CourierAlias)
-                .filter(
-                    CourierAlias.courier_id == c.id,
-                    CourierAlias.alias_norm == an,
-                )
-                .first()
-            )
+            existing = db.query(CourierAlias).filter(
+                CourierAlias.courier_id == c.id,
+                CourierAlias.alias_norm == an,
+            ).first()
             if not existing:
                 db.add(CourierAlias(courier_id=c.id, alias_raw=c.nome_completo, alias_norm=an))
 
@@ -136,14 +132,10 @@ def add_alias(db: Session, courier_id: str, alias_raw: str) -> CourierAlias:
     an = _alias_norm(alias_raw)
     ensure_alias_not_used_by_other_courier(db, an, courier_id=str(c.id))
 
-    existing = (
-        db.query(CourierAlias)
-        .filter(
-            CourierAlias.courier_id == c.id,
-            CourierAlias.alias_norm == an,
-        )
-        .first()
-    )
+    existing = db.query(CourierAlias).filter(
+        CourierAlias.courier_id == c.id,
+        CourierAlias.alias_norm == an,
+    ).first()
     if existing:
         return existing
 
@@ -189,6 +181,7 @@ _ONLY_DIGITS = re.compile(r"\D+")
 
 
 def infer_pix_key_type(key_value_raw: str | None) -> str:
+    """Heuristic for seed JSON: infer enum payment_key_type for Brazil Pix keys."""
     if not key_value_raw:
         return "OUTRO"
     s = key_value_raw.strip()
@@ -196,6 +189,7 @@ def infer_pix_key_type(key_value_raw: str | None) -> str:
         return "EMAIL"
 
     digits = _ONLY_DIGITS.sub("", s)
+    # TELEFONE: DDD(2) + 9 + 8 digits => 11 digits, third digit 9
     if len(digits) == 11 and digits[2] == "9":
         return "TELEFONE"
     if len(digits) == 14:
