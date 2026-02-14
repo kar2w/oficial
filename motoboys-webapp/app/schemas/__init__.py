@@ -1,7 +1,7 @@
 from datetime import date, datetime
 from typing import Literal
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 class ImportResponse(BaseModel):
@@ -75,12 +75,15 @@ class CourierOut(BaseModel):
     aliases: list[CourierAliasOut] = []
 
 
+LedgerTypeLiteral = Literal["EXTRA", "VALE"]
+
+
 class LedgerEntryCreate(BaseModel):
     courier_id: str
     week_id: str
     effective_date: date
-    type: str
-    amount: float
+    type: LedgerTypeLiteral
+    amount: float = Field(..., gt=0)
     related_ride_id: str | None = None
     note: str | None = None
 
@@ -90,10 +93,11 @@ class LedgerEntryOut(BaseModel):
     courier_id: str
     week_id: str
     effective_date: date
-    type: str
+    type: LedgerTypeLiteral
     amount: float
     related_ride_id: str | None = None
     note: str | None = None
+    created_at: str | datetime | None = None
 
 
 class WeekPayoutPreviewRow(BaseModel):
