@@ -1,10 +1,9 @@
-from sqlalchemy import text as sql_text
 from sqlalchemy.orm import Session
+from sqlalchemy import text as sql_text
 
 from app.models import Courier, CourierAlias, CourierPayment
 from app.services.courier_match import norm_text
-from app.services.couriers import ensure_alias_not_used_by_other_courier, infer_pix_key_type
-
+from app.services.couriers import infer_pix_key_type, ensure_alias_not_used_by_other_courier
 
 def seed_weekly_couriers(db: Session, payload: dict) -> dict:
     entregadores = payload.get("entregadores", [])
@@ -20,14 +19,10 @@ def seed_weekly_couriers(db: Session, payload: dict) -> dict:
             return
         an = norm_text(raw)
         ensure_alias_not_used_by_other_courier(db, an, courier_id=courier_id)
-        existing = (
-            db.query(CourierAlias)
-            .filter(
-                CourierAlias.courier_id == courier_id,
-                CourierAlias.alias_norm == an,
-            )
-            .first()
-        )
+        existing = db.query(CourierAlias).filter(
+            CourierAlias.courier_id == courier_id,
+            CourierAlias.alias_norm == an,
+        ).first()
         if existing:
             return
         db.add(CourierAlias(courier_id=courier_id, alias_raw=raw, alias_norm=an))
@@ -68,15 +63,18 @@ def seed_weekly_couriers(db: Session, payload: dict) -> dict:
             created += 1
         else:
             c = exists
+            # idempotent-ish upsert: keep existing values unless we can fill missing data
             c.active = True
             c.categoria = "SEMANAL"
             if not c.nome_completo and e.get("nome_completo"):
                 c.nome_completo = e.get("nome_completo")
             updated += 1
 
+        # default alias from display name and full name (if provided)
         ensure_alias(str(c.id), nome)
         ensure_alias(str(c.id), e.get("nome_completo") or "")
 
+        # optional payment
         upsert_payment(str(c.id), e.get("pagamento") or {})
 
     db.commit()

@@ -1,16 +1,12 @@
-from pydantic_settings import BaseSettings, SettingsConfigDict
+import os
+from dotenv import load_dotenv
 
+load_dotenv()
 
-class Settings(BaseSettings):
-    DATABASE_URL: str = "postgresql+psycopg://postgres:postgres@localhost:5432/motoboys"
-    TZ: str = "America/Fortaleza"
-    CORS_ORIGINS: str = "http://localhost:3000,http://127.0.0.1:3000"
+DATABASE_URL = os.getenv("DATABASE_URL", "")
 
-    model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
+# Project default timezone (company ops): Fortaleza
+TZ = os.getenv("TZ", "America/Fortaleza")
 
-    @property
-    def cors_origins_list(self) -> list[str]:
-        return [origin.strip() for origin in self.CORS_ORIGINS.split(",") if origin.strip()]
-
-
-settings = Settings()
+# Best-effort propagate to process (affects app-local date/time ops only)
+os.environ.setdefault("TZ", TZ)
