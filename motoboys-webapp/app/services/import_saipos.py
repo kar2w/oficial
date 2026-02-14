@@ -7,7 +7,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy.exc import IntegrityError
 
 from app.models import Import, Ride
-from app.services.week_service import get_or_create_week_for_date
+from app.services.week_service import get_or_create_week_for_date, get_open_week_for_date
 from app.services.courier_match import compute_fee_type, saipos_pending_reason, norm_text, match_courier_id
 
 
@@ -87,6 +87,7 @@ def import_saipos(db: Session, file_bytes: bytes, filename: str, file_hash: str)
 
     inserted = 0
     pend_assign = 0
+    redirected_closed_week = 0
 
     batch: list[Ride] = []
 
@@ -119,6 +120,12 @@ def import_saipos(db: Session, file_bytes: bytes, filename: str, file_hash: str)
         fee_type = compute_fee_type(value_f)
         order_date = order_dt.date()
         week = get_or_create_week_for_date(db, order_date)
+
+        paid_in_week_id = None
+        if week.status != "OPEN":
+            payable_week = get_open_week_for_date(db, dt.date.today())
+            paid_in_week_id = payable_week.id
+            redirected_closed_week += 1
 
         courier_name_raw = str(courier_raw) if courier_raw is not None else None
         pending_special = saipos_pending_reason(courier_name_raw)
@@ -162,8 +169,22 @@ def import_saipos(db: Session, file_bytes: bytes, filename: str, file_hash: str)
             is_cancelled=is_cancelled,
             status=status,
             pending_reason=pending_reason,
-            paid_in_week_id=None,
-            meta={"row": r},
+            paid_in_week_id=paid_in_week_id,
+            meta={
+                "row": r,
+                **(
+                    {
+                        "late_import_redirect": {
+                            "original_week_id": str(week.id),
+                            "original_week_status": str(week.status),
+                            "paid_in_week_id": str(paid_in_week_id),
+                            "at": dt.datetime.now().isoformat(timespec="seconds"),
+                        }
+                    }
+                    if paid_in_week_id is not None
+                    else {}
+                ),
+            },
         )
         batch.append(ride)
         if status.startswith("PENDENTE"):
@@ -175,5 +196,15 @@ def import_saipos(db: Session, file_bytes: bytes, filename: str, file_hash: str)
 
     if batch:
         inserted += _commit_rides_best_effort(db, batch)
+
+    try:
+        imp_db = db.query(Import).filter(Import.id == imp.id).first()
+        if imp_db is not None:
+            meta = dict(imp_db.meta or {})
+            meta["redirected_closed_week"] = int(redirected_closed_week)
+            imp_db.meta = meta
+            db.commit()
+    except Exception:
+        db.rollback()
 
     return str(imp.id), inserted, pend_assign, 0
