@@ -31,6 +31,7 @@ def seed_weekly_couriers(db: Session, payload: dict) -> dict:
         if existing:
             return
         db.add(CourierAlias(courier_id=courier_id, alias_raw=raw, alias_norm=an))
+        db.flush()
         aliases_created += 1
 
     def upsert_payment(courier_id: str, pagamento: dict) -> None:
