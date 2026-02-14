@@ -14,31 +14,35 @@ MVP cobre:
 - Docker + Docker Compose
 - Python 3.11+
 
-## Rodar (Linux/Codespaces)
+## Rodar (Linux/Codespaces) a partir da raiz do repositório
 ```bash
 cp .env.example .env
 python -m venv .venv
 source .venv/bin/activate
-pip install -r requirements.txt
+pip install -r motoboys-webapp/requirements.txt
 
 docker compose up -d
 docker exec -i motoboys-db psql -U postgres -d motoboys < db/schema.sql
 
-uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
+uvicorn --app-dir motoboys-webapp app.main:app --reload --host 0.0.0.0 --port 8000
 ```
 
-## Rodar (Windows PowerShell)
+## Rodar (Windows PowerShell) a partir da raiz do repositório
 ```powershell
 copy .env.example .env
 python -m venv .venv
 .\.venv\Scripts\Activate.ps1
-pip install -r requirements.txt
+pip install -r motoboys-webapp/requirements.txt
 
 docker compose up -d
 docker exec -i motoboys-db psql -U postgres -d motoboys < db/schema.sql
 
-uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
+uvicorn --app-dir motoboys-webapp app.main:app --reload --host 0.0.0.0 --port 8000
 ```
+
+## Arquitetura (canônico)
+- Código da aplicação: `motoboys-webapp/app`
+- Entry point da API: `app.main:app` com `--app-dir motoboys-webapp`
 
 ## Swagger
 - http://localhost:8000/docs
