@@ -1,29 +1,72 @@
-import io
 import datetime as dt
+import io
 from typing import Tuple
 
+from fastapi import HTTPException
 from openpyxl import load_workbook
-from sqlalchemy.orm import Session
 from sqlalchemy.exc import IntegrityError
+from sqlalchemy.orm import Session
 
 from app.models import Import, Ride
-from app.services.week_service import get_or_create_week_for_date, get_open_week_for_date
-from app.services.courier_match import compute_fee_type, saipos_pending_reason, norm_text, match_courier_id
+from app.services.courier_match import compute_fee_type, match_courier_id, norm_text, saipos_pending_reason
+from app.services.week_service import get_open_week_for_date, get_or_create_week_for_date
 
 
-def _find_col(headers: list[str], name: str) -> int:
-    nn = norm_text(name)
-    for i, h in enumerate(headers):
-        if norm_text(h) == nn:
-            return i
-    raise ValueError(f"Missing column: {name}")
+def _find_col_alias(headers: list[str], canonical: str, aliases: list[str]) -> int:
+    normalized = {norm_text(h): i for i, h in enumerate(headers) if h is not None}
+    for candidate in [canonical, *aliases]:
+        idx = normalized.get(norm_text(candidate))
+        if idx is not None:
+            return idx
+    raise KeyError(canonical)
+
+
+def _resolve_saipos_cols(headers: list[str]) -> tuple[int, int, int, int, int | None]:
+    required = {
+        "Id do pedido no parceiro": ["ID pedido", "Pedido parceiro", "Id pedido parceiro", "ID do pedido"],
+        "Data da venda": ["Data venda", "Data do pedido", "Data", "Data/Hora"],
+        "Entregador": ["Motoboy", "Entregador(a)", "Entregador nome"],
+        "Valor Entregador": ["Valor do entregador", "Taxa entregador", "Valor motoboy", "Valor taxa motoboy"],
+    }
+    missing: list[str] = []
+    out: dict[str, int] = {}
+    for canonical, aliases in required.items():
+        try:
+            out[canonical] = _find_col_alias(headers, canonical, aliases)
+        except KeyError:
+            missing.append(canonical)
+
+    cancel_idx = None
+    try:
+        cancel_idx = _find_col_alias(
+            headers,
+            "Está cancelado",
+            ["Cancelado", "Pedido cancelado", "Está cancelada", "Status cancelado"],
+        )
+    except KeyError:
+        cancel_idx = None
+
+    if missing:
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "error": "MISSING_REQUIRED_COLUMNS",
+                "source": "SAIPOS",
+                "missing": missing,
+                "headers_found": headers,
+            },
+        )
+
+    return (
+        out["Id do pedido no parceiro"],
+        out["Data da venda"],
+        out["Entregador"],
+        out["Valor Entregador"],
+        cancel_idx,
+    )
 
 
 def _commit_rides_best_effort(db: Session, rides: list[Ride]) -> int:
-    """Commit a chunk of rides; if any constraint fails, fallback to per-row inserts.
-
-    Returns how many were inserted.
-    """
     if not rides:
         return 0
     try:
@@ -32,7 +75,6 @@ def _commit_rides_best_effort(db: Session, rides: list[Ride]) -> int:
         return len(rides)
     except IntegrityError:
         db.rollback()
-        # Clear state of objects from the failed bulk attempt.
         db.expunge_all()
         inserted = 0
         for r in rides:
@@ -42,12 +84,11 @@ def _commit_rides_best_effort(db: Session, rides: list[Ride]) -> int:
                 inserted += 1
             except IntegrityError:
                 db.rollback()
-                # duplicate/constraint violation -> ignore
                 continue
         return inserted
 
 
-def import_saipos(db: Session, file_bytes: bytes, filename: str, file_hash: str) -> Tuple[str, int, int, int]:
+def import_saipos(db: Session, file_bytes: bytes, filename: str, file_hash: str) -> Tuple[str, int, int, int, int, list[str]]:
     imp = Import(source="SAIPOS", filename=filename, file_hash=file_hash, status="DONE", meta={})
     db.add(imp)
     try:
@@ -55,7 +96,7 @@ def import_saipos(db: Session, file_bytes: bytes, filename: str, file_hash: str)
     except IntegrityError:
         db.rollback()
         existing = db.query(Import).filter(Import.source == "SAIPOS", Import.file_hash == file_hash).first()
-        return str(existing.id), 0, 0, 0
+        return str(existing.id), 0, 0, 0, int((existing.meta or {}).get("redirected_closed_week") or 0), []
     db.refresh(imp)
 
     wb = load_workbook(io.BytesIO(file_bytes), data_only=True)
@@ -64,7 +105,7 @@ def import_saipos(db: Session, file_bytes: bytes, filename: str, file_hash: str)
     header_row = None
     for r in range(1, 15):
         vals = [ws.cell(row=r, column=c).value for c in range(1, min(40, ws.max_column) + 1)]
-        if any(v and str(v).strip().lower() == "entregador" for v in vals):
+        if any(v and norm_text(str(v)) in {"ENTREGADOR", "MOTOBOY"} for v in vals):
             header_row = r
             break
     if header_row is None:
@@ -75,19 +116,12 @@ def import_saipos(db: Session, file_bytes: bytes, filename: str, file_hash: str)
         v = ws.cell(row=header_row, column=c).value
         headers.append(str(v).strip() if v is not None else "")
 
-    idx_id = _find_col(headers, "Id do pedido no parceiro")
-    idx_dt = _find_col(headers, "Data da venda")
-    idx_courier = _find_col(headers, "Entregador")
-    idx_val = _find_col(headers, "Valor Entregador")
-    idx_cancel = None
-    try:
-        idx_cancel = _find_col(headers, "Está cancelado")
-    except Exception:
-        idx_cancel = None
+    idx_id, idx_dt, idx_courier, idx_val, idx_cancel = _resolve_saipos_cols(headers)
 
     inserted = 0
     pend_assign = 0
     redirected_closed_week = 0
+    week_ids_touched: set[str] = set()
 
     batch: list[Ride] = []
 
@@ -102,7 +136,7 @@ def import_saipos(db: Session, file_bytes: bytes, filename: str, file_hash: str)
 
         if isinstance(order_dt, str):
             parsed = None
-            for fmt in ("%d/%m/%Y %H:%M:%S", "%d/%m/%Y %H:%M"):
+            for fmt in ("%d/%m/%Y %H:%M:%S", "%d/%m/%Y %H:%M", "%Y-%m-%d %H:%M:%S"):
                 try:
                     parsed = dt.datetime.strptime(order_dt.strip(), fmt)
                     break
@@ -113,18 +147,20 @@ def import_saipos(db: Session, file_bytes: bytes, filename: str, file_hash: str)
             order_dt = parsed
 
         try:
-            value_f = float(str(value_raw).replace(",", "."))
+            value_f = float(str(value_raw).replace(".", "").replace(",", "."))
         except Exception:
             continue
 
         fee_type = compute_fee_type(value_f)
         order_date = order_dt.date()
         week = get_or_create_week_for_date(db, order_date)
+        week_ids_touched.add(str(week.id))
 
         paid_in_week_id = None
         if week.status != "OPEN":
             payable_week = get_open_week_for_date(db, dt.date.today())
             paid_in_week_id = payable_week.id
+            week_ids_touched.add(str(payable_week.id))
             redirected_closed_week += 1
 
         courier_name_raw = str(courier_raw) if courier_raw is not None else None
@@ -140,7 +176,6 @@ def import_saipos(db: Session, file_bytes: bytes, filename: str, file_hash: str)
                 status = "OK"
                 pending_reason = None
             else:
-                status = "PENDENTE_ATRIBUICAO"
                 pending_reason = miss_reason or "NOME_NAO_CADASTRADO"
 
         is_cancelled = None
@@ -170,21 +205,7 @@ def import_saipos(db: Session, file_bytes: bytes, filename: str, file_hash: str)
             status=status,
             pending_reason=pending_reason,
             paid_in_week_id=paid_in_week_id,
-            meta={
-                "row": r,
-                **(
-                    {
-                        "late_import_redirect": {
-                            "original_week_id": str(week.id),
-                            "original_week_status": str(week.status),
-                            "paid_in_week_id": str(paid_in_week_id),
-                            "at": dt.datetime.now().isoformat(timespec="seconds"),
-                        }
-                    }
-                    if paid_in_week_id is not None
-                    else {}
-                ),
-            },
+            meta={"row": r},
         )
         batch.append(ride)
         if status.startswith("PENDENTE"):
@@ -202,9 +223,10 @@ def import_saipos(db: Session, file_bytes: bytes, filename: str, file_hash: str)
         if imp_db is not None:
             meta = dict(imp_db.meta or {})
             meta["redirected_closed_week"] = int(redirected_closed_week)
+            meta["week_ids_touched"] = sorted(week_ids_touched)
             imp_db.meta = meta
             db.commit()
     except Exception:
         db.rollback()
 
-    return str(imp.id), inserted, pend_assign, 0
+    return str(imp.id), inserted, pend_assign, 0, redirected_closed_week, sorted(week_ids_touched)
