@@ -6,10 +6,12 @@ from dotenv import load_dotenv
 
 
 def _load_dotenvs() -> None:
+    # 1) .env do cwd (se você rodar pela raiz, pega a raiz)
     load_dotenv(override=False)
 
+    # 2) .env do motoboys-webapp (se existir)
     here = Path(__file__).resolve()
-    webapp_env = here.parents[2] / ".env"
+    webapp_env = here.parents[2] / ".env"  # .../motoboys-webapp/.env
     if webapp_env.exists():
         load_dotenv(webapp_env, override=False)
 
@@ -34,23 +36,20 @@ if _db.lower().startswith("sqlite") or not (
 _tz = os.getenv("TZ", "America/Fortaleza")
 os.environ.setdefault("TZ", _tz)
 
-_default_weekly_json = str((Path(__file__).resolve().parents[1] / "data" / "entregadores_semanais.json"))
-
 
 @dataclass(frozen=True)
 class Settings:
     DATABASE_URL: str
     TZ: str
     cors_origins_list: list[str]
-    WEEKLY_COURIERS_JSON_PATH: str
 
 
 settings = Settings(
     DATABASE_URL=_db,
     TZ=_tz,
     cors_origins_list=_parse_cors_origins(os.getenv("CORS_ORIGINS")),
-    WEEKLY_COURIERS_JSON_PATH=os.getenv("WEEKLY_COURIERS_JSON_PATH", _default_weekly_json).strip() or _default_weekly_json,
 )
 
+# compat
 DATABASE_URL = settings.DATABASE_URL
 TZ = settings.TZ
