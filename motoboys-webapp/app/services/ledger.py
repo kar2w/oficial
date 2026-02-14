@@ -53,11 +53,13 @@ def create_ledger_entry(
     note=None,
 ):
     week = db.execute(
-        sa_text("SELECT id, start_date, end_date FROM weeks WHERE id::text = :week_id"),
+        sa_text("SELECT id, start_date, end_date, status FROM weeks WHERE id::text = :week_id"),
         {"week_id": week_id},
     ).mappings().first()
     if not week:
         raise HTTPException(status_code=404, detail="week not found")
+    if week["status"] != "OPEN":
+        raise HTTPException(status_code=409, detail={"error": "WEEK_NOT_OPEN", "status": week["status"]})
 
     courier_exists = db.execute(
         sa_text("SELECT 1 FROM couriers WHERE id::text = :courier_id"), {"courier_id": courier_id}
@@ -89,8 +91,10 @@ def create_ledger_entry(
                 """
                 SELECT COALESCE(SUM(r.fee_type), 0)
                 FROM rides r
-                WHERE r.week_id::text = :week_id
-                  AND r.paid_in_week_id IS NULL
+                WHERE (
+                        (r.week_id::text = :week_id AND r.paid_in_week_id IS NULL)
+                        OR r.paid_in_week_id::text = :week_id
+                    )
                   AND r.courier_id::text = :courier_id
                   AND r.status = 'OK'
                   AND (r.is_cancelled IS NULL OR r.is_cancelled = false)
