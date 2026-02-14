@@ -1,0 +1,143 @@
+diff -ruN ./.env.example ./.env.example
+--- ./.env.example	2026-02-13 14:27:22.000000000 +0000
++++ ./.env.example	2026-02-13 18:28:49.714800255 +0000
+@@ -1,3 +1,3 @@
+ # Copy to .env and adjust if needed
+ DATABASE_URL=postgresql+psycopg://postgres:postgres@localhost:5432/motoboys
+-TZ=America/Belem
++TZ=America/Fortaleza
+diff -ruN ./app/db.py ./app/db.py
+--- ./app/db.py	2026-02-13 14:27:22.000000000 +0000
++++ ./app/db.py	2026-02-13 18:14:41.221587586 +0000
+@@ -1,11 +1,45 @@
+-from sqlalchemy import create_engine
+-from sqlalchemy.orm import sessionmaker
++import datetime as dt
++
++from sqlalchemy import create_engine, event
++from sqlalchemy.orm import sessionmaker, Session
+ 
+ from app.settings import DATABASE_URL
+ 
+ engine = create_engine(DATABASE_URL, pool_pre_ping=True)
+ SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False)
+ 
++
++@event.listens_for(Session, "before_flush")
++def _touch_timestamps(session: Session, flush_context, instances):
++    """Maintain updated_at (and created_at when missing) on ORM objects.
++
++    The database has defaults, but this keeps `updated_at` changing on mutations,
++    avoiding silent drift between schema.sql and ORM behavior.
++    """
++    now = dt.datetime.now(dt.timezone.utc)
++
++    # New instances
++    for obj in session.new:
++        if hasattr(obj, "created_at") and getattr(obj, "created_at") is None:
++            try:
++                setattr(obj, "created_at", now)
++            except Exception:
++                pass
++        if hasattr(obj, "updated_at"):
++            try:
++                setattr(obj, "updated_at", now)
++            except Exception:
++                pass
++
++    # Dirty instances
++    for obj in session.dirty:
++        if hasattr(obj, "updated_at"):
++            try:
++                setattr(obj, "updated_at", now)
++            except Exception:
++                pass
++
++
+ def get_db():
+     db = SessionLocal()
+     try:
+diff -ruN ./app/main.py ./app/main.py
+--- ./app/main.py	2026-02-13 14:27:22.000000000 +0000
++++ ./app/main.py	2026-02-13 18:14:59.751364818 +0000
+@@ -1,5 +1,6 @@
+ from fastapi import FastAPI, UploadFile, File, Form, Depends, HTTPException
+ from sqlalchemy.orm import Session
++from sqlalchemy import text as sa_text
+ import datetime as dt
+ 
+ from app.db import get_db
+@@ -17,7 +18,8 @@
+ app = FastAPI(title="Motoboys WebApp API")
+ 
+ @app.get("/health")
+-def health():
++def health(db: Session = Depends(get_db)):
++    db.execute(sa_text("SELECT 1"))
+     return {"ok": True}
+ 
+ @app.get("/weeks")
+diff -ruN ./app/models.py ./app/models.py
+--- ./app/models.py	2026-02-13 14:27:22.000000000 +0000
++++ ./app/models.py	2026-02-13 18:33:47.535775354 +0000
+@@ -1,16 +1,56 @@
+-import uuid
+ import datetime as dt
++import uuid
+ 
++from sqlalchemy import (
++    BigInteger,
++    Boolean,
++    Date,
++    DateTime,
++    ForeignKey,
++    Index,
++    Integer,
++    Numeric,
++    SmallInteger,
++    Text,
++    UniqueConstraint,
++    text as sql_text,
++)
++from sqlalchemy.dialects.postgresql import ENUM as PGEnum
++from sqlalchemy.dialects.postgresql import JSONB, UUID
+ from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
+-from sqlalchemy import Text, String, Boolean, Date, DateTime, Numeric, Integer, BigInteger, ForeignKey
+-from sqlalchemy.dialects.postgresql import UUID, JSONB
+-from sqlalchemy import text as sql_text
+ 
+ 
+ class Base(DeclarativeBase):
+     pass
+ 
+ 
++# NOTE: enums are created by db/schema.sql. We set create_type=False so SQLAlchemy won't try to create them.
++WEEK_STATUS = PGEnum("OPEN", "CLOSED", "PAID", name="week_status", create_type=False)
++COURIER_CATEGORY = PGEnum("SEMANAL", "DIARISTA", name="courier_category", create_type=False)
++IMPORT_SOURCE = PGEnum("SAIPOS", "YOOGA", name="import_source", create_type=False)
++RIDE_STATUS = PGEnum(
++    "OK",
++    "PENDENTE_ATRIBUICAO",
++    "PENDENTE_REVISAO",
++    "PENDENTE_MATCH",
++    "DESCARTADO",
++    name="ride_status",
++    create_type=False,
++)
++LEDGER_TYPE = PGEnum("EXTRA", "VALE", name="ledger_type", create_type=False)
++PAYMENT_KEY_TYPE = PGEnum(
++    "CPF", "CNPJ", "TELEFONE", "EMAIL", "ALEATORIA", "OUTRO", name="payment_key_type", create_type=False
++)
++LOAN_STATUS = PGEnum("ACTIVE", "PAUSED", "DONE", "CANCELLED", name="loan_status", create_type=False)
++INSTALLMENT_STATUS = PGEnum(
++    "DUE", "PAUSED", "PARTIAL", "ROLLED", "PAID", "CANCELLED", name="installment_status", create_type=False
++)
++ROUNDING_MODE = PGEnum("REAL", "CENT", name="rounding_mode", create_type=False)
++REVIEW_STATUS = PGEnum("PENDING", "RESOLVED", name="review_status", create_type=False)
++
++MONEY = Numeric(12, 2, asdecimal=False)
++
++
+ class Week(Base):
+     __tablename__ = "weeks"
+
