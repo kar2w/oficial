@@ -2,8 +2,8 @@ import datetime as dt
 from sqlalchemy.orm import Session
 from fastapi import HTTPException
 
-from app.models import Ride, Week, LedgerEntry, YoogaReviewGroup, YoogaReviewItem
-from app.services.week_service import get_current_week
+from app.models import Ride, Week, YoogaReviewGroup, YoogaReviewItem
+from app.services.week_service import get_open_week_for_date
 
 
 def list_assignment(db: Session):
@@ -23,18 +23,20 @@ def assign_ride(db: Session, ride_id: str, courier_id: str, pay_in_current_week:
         raise HTTPException(status_code=400, detail="week not found")
 
     if week.status in ("CLOSED","PAID") and pay_in_current_week:
-        current = get_current_week(db, dt.date.today())
-        le = LedgerEntry(
-            courier_id=courier_id,
-            week_id=current.id,
-            effective_date=dt.date.today(),
-            type="EXTRA",
-            amount=float(ride.fee_type),
-            related_ride_id=ride.id,
-            note=f"Corrida atribuída tardiamente (origem week_id={ride.week_id})",
-        )
-        db.add(le)
+        current = get_open_week_for_date(db, dt.date.today())
+        # IMPORTANT (MVP safety): do NOT create a LedgerEntry here.
+        # The payout scope already includes rides moved via paid_in_week_id.
+        # Creating an EXTRA would duplicate payment (ride fee + extra).
         ride.paid_in_week_id = current.id
+
+        # Keep a small audit trail in ride.meta (no financial effect).
+        meta = dict(ride.meta or {})
+        meta["late_assignment"] = {
+            "at": dt.datetime.now().isoformat(timespec="seconds"),
+            "original_week_id": str(ride.week_id),
+            "paid_in_week_id": str(current.id),
+        }
+        ride.meta = meta
 
     db.commit()
     return ride

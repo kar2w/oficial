@@ -2,10 +2,10 @@ import datetime as dt
 from typing import Any, Dict, List, Optional
 
 from fastapi import HTTPException
-from sqlalchemy import and_, or_, func, case
+from sqlalchemy import and_, case, func, or_, text as sa_text
 from sqlalchemy.orm import Session
 
-from app.models import Week, Ride, LedgerEntry, Courier, WeekPayout
+from app.models import Courier, LedgerEntry, Ride, Week, WeekPayout
 
 
 _PENDING_STATUSES = {"PENDENTE_ATRIBUICAO", "PENDENTE_REVISAO", "PENDENTE_MATCH"}
@@ -24,6 +24,28 @@ def _scope_filter(week_id: str):
         and_(Ride.week_id == week_id, Ride.paid_in_week_id.is_(None)),
         Ride.paid_in_week_id == week_id,
     )
+
+
+def _get_due_installments(db: Session, courier_id: str, closing_seq: int):
+    return db.execute(
+        sa_text(
+            """
+            SELECT li.id, li.due_closing_seq, li.amount, li.paid_amount
+            FROM loan_installments li
+            JOIN loan_plans lp ON lp.id = li.plan_id
+            WHERE lp.courier_id = :courier_id
+              AND lp.status = 'ACTIVE'
+              AND li.status IN ('DUE','ROLLED','PARTIAL')
+              AND li.due_closing_seq <= :closing_seq
+            ORDER BY li.due_closing_seq ASC, li.installment_no ASC
+            """
+        ),
+        {"courier_id": courier_id, "closing_seq": int(closing_seq)},
+    ).mappings().all()
+
+
+def _remaining_installment_amount(inst_row) -> float:
+    return max(0.0, float(inst_row["amount"] or 0) - float(inst_row["paid_amount"] or 0))
 
 
 def compute_week_payout_preview(db: Session, week_id: str) -> List[Dict[str, Any]]:
@@ -111,22 +133,28 @@ def compute_week_payout_preview(db: Session, week_id: str) -> List[Dict[str, Any
         for cid in courier_ids:
             by_id[cid]["courier_nome"] = names.get(cid)
 
-    # Compute net
     out = []
     for cid, row in by_id.items():
         rides_amount = float(row["rides_amount"])
         extras_amount = float(row["extras_amount"])
         vales_amount = float(row["vales_amount"])
-        installments_amount = float(row["installments_amount"])
 
-        net = rides_amount + extras_amount - vales_amount - installments_amount
+        installment_due_total = 0.0
+        if cid is not None:
+            for inst in _get_due_installments(db, str(cid), int(w.closing_seq)):
+                installment_due_total += _remaining_installment_amount(inst)
+
+        pre_installment_net = rides_amount + extras_amount - vales_amount
+        installments_amount = max(0.0, min(pre_installment_net, installment_due_total))
+        row["installments_amount"] = float(installments_amount)
+
+        net = pre_installment_net - installments_amount
         row["net_amount"] = float(net)
-
-        # In v1: no loans yet. Flag red reserved for future.
-        row["is_flag_red"] = False
+        row["is_flag_red"] = bool(installment_due_total > installments_amount + 1e-9)
 
         if cid is None:
             row["courier_nome"] = row["courier_nome"] or "<SEM ATRIBUIÇÃO>"
+            row["is_flag_red"] = False
         out.append(row)
 
     def sort_key(x):
@@ -163,6 +191,86 @@ def close_week(db: Session, week_id: str) -> Dict[str, Any]:
         cid = r.get("courier_id")
         if cid is None:
             continue
+
+        # Apply loan installments with audit trail.
+        to_apply = float(r.get("installments_amount") or 0)
+        due_rows = _get_due_installments(db, str(cid), int(w.closing_seq))
+
+        for inst in due_rows:
+            inst_id = str(inst["id"])
+            remaining = _remaining_installment_amount(inst)
+            if remaining <= 0:
+                continue
+
+            applied = min(to_apply, remaining)
+            if applied > 0:
+                db.execute(
+                    sa_text(
+                        """
+                        INSERT INTO loan_installment_applications (installment_id, week_id, applied_amount, note)
+                        VALUES (:installment_id, :week_id, :applied_amount, :note)
+                        """
+                    ),
+                    {
+                        "installment_id": inst_id,
+                        "week_id": str(w.id),
+                        "applied_amount": applied,
+                        "note": "Desconto automático no fechamento semanal",
+                    },
+                )
+
+                db.execute(
+                    sa_text(
+                        """
+                        UPDATE loan_installments
+                        SET paid_amount = paid_amount + :applied_amount
+                        WHERE id = :installment_id
+                        """
+                    ),
+                    {"installment_id": inst_id, "applied_amount": applied},
+                )
+
+                to_apply -= applied
+                remaining -= applied
+
+            # If not fully paid this closing, roll to next closing sequence.
+            if remaining <= 1e-9:
+                db.execute(
+                    sa_text("UPDATE loan_installments SET status = 'PAID' WHERE id = :installment_id"),
+                    {"installment_id": inst_id},
+                )
+            else:
+                next_status = "PARTIAL" if applied > 0 else "ROLLED"
+                db.execute(
+                    sa_text(
+                        """
+                        UPDATE loan_installments
+                        SET status = :status,
+                            due_closing_seq = due_closing_seq + 1
+                        WHERE id = :installment_id
+                        """
+                    ),
+                    {"installment_id": inst_id, "status": next_status},
+                )
+
+        # close plans without open installments
+        db.execute(
+            sa_text(
+                """
+                UPDATE loan_plans lp
+                SET status = 'DONE'
+                WHERE lp.courier_id = :courier_id
+                  AND lp.status = 'ACTIVE'
+                  AND NOT EXISTS (
+                    SELECT 1 FROM loan_installments li
+                    WHERE li.plan_id = lp.id
+                      AND li.status IN ('DUE','ROLLED','PARTIAL')
+                  )
+                """
+            ),
+            {"courier_id": str(cid)},
+        )
+
         db.add(
             WeekPayout(
                 week_id=w.id,
@@ -173,7 +281,7 @@ def close_week(db: Session, week_id: str) -> Dict[str, Any]:
                 installments_amount=r["installments_amount"],
                 net_amount=r["net_amount"],
                 pending_count=r["pending_count"],
-                is_flag_red=False,
+                is_flag_red=bool(r.get("is_flag_red")),
             )
         )
 
