@@ -349,8 +349,8 @@ async def do_import(source: str = Form(...), file: UploadFile = File(...), db: S
 @app.get("/imports")
 def list_imports(
     source: str | None = Query(default=None),
-    after: dt.datetime | None = Query(default=None),
-    before: dt.datetime | None = Query(default=None),
+    after: str | None = Query(default=None),
+    before: str | None = Query(default=None),
     limit: int = Query(default=50, ge=1, le=200),
     offset: int = Query(default=0, ge=0),
     db: Session = Depends(get_db),
@@ -472,7 +472,7 @@ def list_rides(
     week_id: str | None = Query(default=None),
     courier_id: str | None = Query(default=None),
     status: str | None = Query(default=None),
-    date: dt.date | None = Query(default=None),
+    date: str | None = Query(default=None),
     limit: int = Query(default=100, ge=1, le=500),
     offset: int = Query(default=0, ge=0),
     db: Session = Depends(get_db),
