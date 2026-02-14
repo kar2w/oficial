@@ -19,6 +19,7 @@ from app.schemas import (
     ImportResponse,
     LedgerEntryCreate,
     LedgerEntryOut,
+    LedgerCreateOut,
     ResolveYoogaBody,
     SeedRequest,
     WeekPayoutPreviewRow,
@@ -177,6 +178,7 @@ def week_payout_preview(week_id: str, db: Session = Depends(get_db)):
             installments_amount=float(r.get("installments_amount") or 0),
             net_amount=float(r.get("net_amount") or 0),
             pending_count=int(r.get("pending_count") or 0),
+            is_flag_red=bool(r.get("is_flag_red") or False),
         )
         for r in rows
     ]
@@ -219,7 +221,7 @@ def week_payout_csv(week_id: str, db: Session = Depends(get_db)):
     import io
 
     w = get_week_or_404(db, week_id)
-    if w["status"] in ("CLOSED", "PAID"):
+    if w.status in ("CLOSED", "PAID"):
         rows = get_payout_snapshot(db, week_id)
         header = [
             "courier_nome",
@@ -230,6 +232,7 @@ def week_payout_csv(week_id: str, db: Session = Depends(get_db)):
             "installments_amount",
             "net_amount",
             "pending_count",
+            "is_flag_red",
             "computed_at",
             "paid_at",
         ]
@@ -243,6 +246,7 @@ def week_payout_csv(week_id: str, db: Session = Depends(get_db)):
                 "installments_amount": r["installments_amount"],
                 "net_amount": r["net_amount"],
                 "pending_count": r["pending_count"],
+                "is_flag_red": r.get("is_flag_red"),
                 "computed_at": r.get("computed_at"),
                 "paid_at": r.get("paid_at"),
             }
@@ -260,6 +264,7 @@ def week_payout_csv(week_id: str, db: Session = Depends(get_db)):
             "installments_amount",
             "net_amount",
             "pending_count",
+            "is_flag_red",
         ]
         data_rows = [
             {
@@ -272,6 +277,7 @@ def week_payout_csv(week_id: str, db: Session = Depends(get_db)):
                 "installments_amount": r.get("installments_amount"),
                 "net_amount": r.get("net_amount"),
                 "pending_count": r.get("pending_count"),
+                "is_flag_red": r.get("is_flag_red"),
             }
             for r in rows
         ]
@@ -282,7 +288,7 @@ def week_payout_csv(week_id: str, db: Session = Depends(get_db)):
     for row in data_rows:
         wr.writerow(row)
 
-    filename = f"week_{w['start_date']}_to_{w['end_date']}_payouts.csv"
+    filename = f"week_{w.start_date}_to_{w.end_date}_payouts.csv"
     return Response(
         content=buf.getvalue(),
         media_type="text/csv",
@@ -295,7 +301,7 @@ def week_ledger(week_id: str, courier_id: str | None = Query(default=None), db: 
     return list_week_ledger(db, week_id=week_id, courier_id=courier_id)
 
 
-@app.post("/ledger", response_model=LedgerEntryOut)
+@app.post("/ledger", response_model=LedgerCreateOut)
 def ledger_create(body: LedgerEntryCreate, db: Session = Depends(get_db)):
     return create_ledger_entry(
         db,

@@ -109,6 +109,14 @@ class LedgerEntryOut(BaseModel):
     created_at: str
 
 
+class LedgerCreateOut(BaseModel):
+    ledger_entry: Optional[LedgerEntryOut] = None
+    vale_amount: float = 0.0
+    loan_amount: float = 0.0
+    loan_plan_id: Optional[str] = None
+    loan_n_installments: Optional[int] = None
+
+
 # =====================
 # Week payouts
 # =====================
@@ -125,6 +133,7 @@ class WeekPayoutPreviewRow(BaseModel):
     installments_amount: float = 0.0
     net_amount: float = 0.0
     pending_count: int = 0
+    is_flag_red: bool = False
 
 
 class WeekPayoutSnapshotRow(BaseModel):

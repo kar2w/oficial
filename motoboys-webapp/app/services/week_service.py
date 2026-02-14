@@ -20,3 +20,21 @@ def get_or_create_week_for_date(db: Session, d: dt.date) -> Week:
 
 def get_current_week(db: Session, today: dt.date) -> Week:
     return get_or_create_week_for_date(db, today)
+
+
+
+def get_open_week_for_date(db: Session, d: dt.date) -> Week:
+    """Return an OPEN week on/after the week containing `d`."""
+    w = get_or_create_week_for_date(db, d)
+    if w.status == "OPEN":
+        return w
+
+    cursor = w.end_date + dt.timedelta(days=1)
+    ww = w
+    for _ in range(26):
+        ww = get_or_create_week_for_date(db, cursor)
+        if ww.status == "OPEN":
+            return ww
+        cursor = ww.end_date + dt.timedelta(days=1)
+
+    return ww
