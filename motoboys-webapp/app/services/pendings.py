@@ -1,16 +1,24 @@
 import datetime as dt
-from sqlalchemy.orm import Session
+
 from fastapi import HTTPException
+from sqlalchemy import func
+from sqlalchemy.orm import Session
 
 from app.models import Ride, Week, YoogaReviewGroup, YoogaReviewItem
 from app.services.week_service import get_open_week_for_date
 
 
-def list_assignment(db: Session):
-    return db.query(Ride).filter(Ride.status=="PENDENTE_ATRIBUICAO").order_by(Ride.order_dt.asc()).all()
+def list_assignment(db: Session, week_id: str | None = None, source: str | None = None):
+    q = db.query(Ride).filter(Ride.status == "PENDENTE_ATRIBUICAO")
+    if week_id:
+        q = q.filter(Ride.week_id == week_id)
+    if source:
+        q = q.filter(Ride.source == source)
+    return q.order_by(Ride.order_dt.asc()).all()
+
 
 def assign_ride(db: Session, ride_id: str, courier_id: str, pay_in_current_week: bool = True):
-    ride = db.query(Ride).filter(Ride.id==ride_id).first()
+    ride = db.query(Ride).filter(Ride.id == ride_id).first()
     if not ride:
         raise HTTPException(status_code=404, detail="ride not found")
 
@@ -18,18 +26,13 @@ def assign_ride(db: Session, ride_id: str, courier_id: str, pay_in_current_week:
     ride.status = "OK"
     ride.pending_reason = None
 
-    week = db.query(Week).filter(Week.id==ride.week_id).first()
+    week = db.query(Week).filter(Week.id == ride.week_id).first()
     if not week:
         raise HTTPException(status_code=400, detail="week not found")
 
-    if week.status in ("CLOSED","PAID") and pay_in_current_week:
+    if week.status in ("CLOSED", "PAID") and pay_in_current_week:
         current = get_open_week_for_date(db, dt.date.today())
-        # IMPORTANT (MVP safety): do NOT create a LedgerEntry here.
-        # The payout scope already includes rides moved via paid_in_week_id.
-        # Creating an EXTRA would duplicate payment (ride fee + extra).
         ride.paid_in_week_id = current.id
-
-        # Keep a small audit trail in ride.meta (no financial effect).
         meta = dict(ride.meta or {})
         meta["late_assignment"] = {
             "at": dt.datetime.now().isoformat(timespec="seconds"),
@@ -41,26 +44,44 @@ def assign_ride(db: Session, ride_id: str, courier_id: str, pay_in_current_week:
     db.commit()
     return ride
 
-def list_yooga_groups(db: Session):
-    groups = db.query(YoogaReviewGroup).filter(YoogaReviewGroup.status=="PENDING").order_by(YoogaReviewGroup.id.desc()).all()
-    out = []
-    for g in groups:
-        count = db.query(YoogaReviewItem).filter(YoogaReviewItem.group_id==g.id).count()
-        out.append({"group_id": str(g.id), "week_id": str(g.week_id), "signature_key": g.signature_key, "items": count})
-    return out
+
+def list_yooga_groups(db: Session, week_id: str | None = None, source: str | None = None):
+    q = (
+        db.query(
+            YoogaReviewGroup.id.label("group_id"),
+            YoogaReviewGroup.week_id.label("week_id"),
+            YoogaReviewGroup.signature_key.label("signature_key"),
+            func.count(YoogaReviewItem.ride_id).label("items"),
+        )
+        .join(YoogaReviewItem, YoogaReviewItem.group_id == YoogaReviewGroup.id)
+        .join(Ride, Ride.id == YoogaReviewItem.ride_id)
+        .filter(YoogaReviewGroup.status == "PENDING")
+    )
+    if week_id:
+        q = q.filter(YoogaReviewGroup.week_id == week_id)
+    if source:
+        q = q.filter(Ride.source == source)
+
+    rows = q.group_by(YoogaReviewGroup.id, YoogaReviewGroup.week_id, YoogaReviewGroup.signature_key).order_by(YoogaReviewGroup.id.desc()).all()
+
+    return [
+        {"group_id": str(r.group_id), "week_id": str(r.week_id), "signature_key": r.signature_key, "items": int(r.items or 0)}
+        for r in rows
+    ]
+
 
 def yooga_group_items(db: Session, group_id: str):
-    items = db.query(YoogaReviewItem).filter(YoogaReviewItem.group_id==group_id).all()
-    rides = []
-    for it in items:
-        r = db.query(Ride).filter(Ride.id==it.ride_id).first()
-        if r:
-            rides.append(r)
-    rides.sort(key=lambda x: (x.order_dt, x.delivery_dt or x.order_dt))
-    return rides
+    return (
+        db.query(Ride)
+        .join(YoogaReviewItem, YoogaReviewItem.ride_id == Ride.id)
+        .filter(YoogaReviewItem.group_id == group_id)
+        .order_by(Ride.order_dt.asc(), Ride.delivery_dt.asc())
+        .all()
+    )
+
 
 def resolve_yooga(db: Session, group_id: str, action: str, keep_ride_id: str | None):
-    grp = db.query(YoogaReviewGroup).filter(YoogaReviewGroup.id==group_id).first()
+    grp = db.query(YoogaReviewGroup).filter(YoogaReviewGroup.id == group_id).first()
     if not grp:
         raise HTTPException(status_code=404, detail="group not found")
 
@@ -68,7 +89,6 @@ def resolve_yooga(db: Session, group_id: str, action: str, keep_ride_id: str | N
     if action == "APPROVE_ALL":
         for r in rides:
             if r.status == "PENDENTE_REVISAO":
-                # Only OK if courier is already known; otherwise it must go back to assignment.
                 if r.courier_id is not None:
                     r.status = "OK"
                     r.pending_reason = None

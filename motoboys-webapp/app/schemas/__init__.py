@@ -8,6 +8,8 @@ class ImportResponse(BaseModel):
     inserted: int
     pendente_atribuicao: int
     pendente_revisao: int
+    redirected_closed_week: int = 0
+    week_ids_touched: List[str] = []
 
 class AssignRideBody(BaseModel):
     courier_id: str
