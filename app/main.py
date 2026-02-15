@@ -175,9 +175,11 @@ def couriers_put_payment(courier_id: str, body: CourierPaymentIn, db: Session = 
 @app.get("/weeks")
 def list_weeks(db: Session = Depends(get_db)):
     rows = db.execute(
-        """SELECT id, start_date, end_date, status, closing_seq
+        sa_text(
+            """SELECT id, start_date, end_date, status, closing_seq
              FROM weeks
              ORDER BY start_date DESC"""
+        )
     ).mappings().all()
     return [dict(r) for r in rows]
 
