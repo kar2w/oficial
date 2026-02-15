@@ -27,11 +27,21 @@ from app.services.payouts import close_week, compute_week_payout_preview, get_we
 from app.services.pendings import assign_ride, list_assignment, list_yooga_groups, resolve_yooga, yooga_group_items
 from app.services.utils import read_upload_bytes, sha256_bytes
 from app.services.week_service import get_open_week_for_date
+from app.settings import settings
 
 BASE_DIR = Path(__file__).resolve().parent
 templates = Jinja2Templates(directory=str(BASE_DIR / "templates"))
 
-router = APIRouter(prefix="/ui", include_in_schema=False)
+router_public = APIRouter(prefix="/ui", include_in_schema=False)
+
+
+def require_ui_auth(request: Request) -> None:
+    if not request.session.get("is_authenticated"):
+        next_path = quote(str(request.url.path), safe="/")
+        raise HTTPException(status_code=303, headers={"Location": f"/ui/login?next={next_path}"})
+
+
+router_private = APIRouter(prefix="/ui", include_in_schema=False, dependencies=[Depends(require_ui_auth)])
 
 
 def _ui_redirect(url: str) -> RedirectResponse:
@@ -91,12 +101,45 @@ def _list_weeks(db: Session):
     return [dict(r) for r in rows]
 
 
-@router.get("/", response_class=HTMLResponse)
+@router_public.get("/login", response_class=HTMLResponse)
+def login_page(request: Request, next: str = Query(default="/ui/imports/new")):
+    return templates.TemplateResponse("login.html", {"request": request, "error": None, "next": next})
+
+
+@router_public.post("/login", response_class=HTMLResponse)
+def login_submit(
+    request: Request,
+    username: str = Form(...),
+    password: str = Form(...),
+    next: str = Form(default="/ui/imports/new"),
+):
+    if username == settings.ADMIN_USERNAME and password == settings.ADMIN_PASSWORD:
+        request.session["is_authenticated"] = True
+        request.session["username"] = username
+        if not next.startswith("/ui"):
+            next = "/ui/imports/new"
+        return _ui_redirect(next)
+
+    return templates.TemplateResponse(
+        "login.html",
+        {"request": request, "error": "Credenciais inválidas.", "next": next},
+        status_code=401,
+    )
+
+
+@router_public.post("/logout")
+def logout(request: Request):
+    request.session.clear()
+    return _ui_redirect("/ui/login?ok=1&msg=Sess%C3%A3o+encerrada")
+
+
+
+@router_private.get("/", response_class=HTMLResponse)
 def ui_home():
     return _ui_redirect("/ui/imports/new")
 
 
-@router.get("/imports/new", response_class=HTMLResponse)
+@router_private.get("/imports/new", response_class=HTMLResponse)
 def imports_new(request: Request):
     return templates.TemplateResponse(
         "imports_new.html",
@@ -104,7 +147,7 @@ def imports_new(request: Request):
     )
 
 
-@router.post("/imports/new", response_class=HTMLResponse)
+@router_private.post("/imports/new", response_class=HTMLResponse)
 async def imports_new_post(
     request: Request,
     source: str = Form(...),
@@ -153,7 +196,7 @@ async def imports_new_post(
         )
 
 
-@router.get("/imports", response_class=HTMLResponse)
+@router_private.get("/imports", response_class=HTMLResponse)
 def imports_list(
     request: Request,
     source: str | None = Query(default=None),
@@ -180,7 +223,7 @@ def imports_list(
     )
 
 
-@router.get("/imports/{import_id}", response_class=HTMLResponse)
+@router_private.get("/imports/{import_id}", response_class=HTMLResponse)
 def imports_detail(request: Request, import_id: str, db: Session = Depends(get_db)):
     imp = db.query(Import).filter(Import.id == import_id).first()
     if not imp:
@@ -199,7 +242,7 @@ def imports_detail(request: Request, import_id: str, db: Session = Depends(get_d
     return templates.TemplateResponse("imports_detail.html", {"request": request, "imp": detail})
 
 
-@router.get("/pendencias", response_class=HTMLResponse)
+@router_private.get("/pendencias", response_class=HTMLResponse)
 def pendencias(
     request: Request,
     tab: str = Query(default="atribuicao"),
@@ -272,7 +315,7 @@ def pendencias(
     )
 
 
-@router.post("/pendencias/assign", response_class=HTMLResponse)
+@router_private.post("/pendencias/assign", response_class=HTMLResponse)
 def pendencias_assign(
     request: Request,
     ride_id: str = Form(...),
@@ -293,7 +336,7 @@ def pendencias_assign(
         )
 
 
-@router.get("/pendencias/yooga/{group_id}", response_class=HTMLResponse)
+@router_private.get("/pendencias/yooga/{group_id}", response_class=HTMLResponse)
 def pendencias_yooga_group(
     request: Request,
     group_id: str,
@@ -322,7 +365,7 @@ def pendencias_yooga_group(
     )
 
 
-@router.post("/pendencias/yooga/{group_id}/resolve", response_class=HTMLResponse)
+@router_private.post("/pendencias/yooga/{group_id}/resolve", response_class=HTMLResponse)
 def pendencias_yooga_resolve(
     request: Request,
     group_id: str,
@@ -335,7 +378,7 @@ def pendencias_yooga_resolve(
     return _ui_redirect(f"/ui/pendencias?tab=yooga&week_id={week_id}&ok=1")
 
 
-@router.get("/weeks/current", response_class=HTMLResponse)
+@router_private.get("/weeks/current", response_class=HTMLResponse)
 def weeks_current(
     request: Request,
     week_id: str | None = Query(default=None),
@@ -368,7 +411,7 @@ def weeks_current(
     )
 
 
-@router.post("/weeks/{week_id}/close")
+@router_private.post("/weeks/{week_id}/close")
 def weeks_close_ui(week_id: str, db: Session = Depends(get_db)):
     try:
         close_week(db, week_id=week_id)
@@ -377,7 +420,7 @@ def weeks_close_ui(week_id: str, db: Session = Depends(get_db)):
         return _ui_redirect(f"/ui/weeks/current?week_id={week_id}&err={quote(_friendly_error_message(exc))}")
 
 
-@router.post("/weeks/{week_id}/pay")
+@router_private.post("/weeks/{week_id}/pay")
 def weeks_pay_ui(week_id: str, db: Session = Depends(get_db)):
     try:
         pay_week(db, week_id=week_id)
@@ -386,7 +429,7 @@ def weeks_pay_ui(week_id: str, db: Session = Depends(get_db)):
         return _ui_redirect(f"/ui/weeks/current?week_id={week_id}&err={quote(_friendly_error_message(exc))}")
 
 
-@router.get("/weeks/{week_id}/couriers/{courier_id}", response_class=HTMLResponse)
+@router_private.get("/weeks/{week_id}/couriers/{courier_id}", response_class=HTMLResponse)
 def week_courier_audit(
     request: Request,
     week_id: str,
@@ -488,7 +531,7 @@ def week_courier_audit(
     )
 
 
-@router.get("/couriers", response_class=HTMLResponse)
+@router_private.get("/couriers", response_class=HTMLResponse)
 def couriers_list_ui(
     request: Request,
     q: str | None = Query(default=None),
@@ -526,7 +569,7 @@ def couriers_list_ui(
     )
 
 
-@router.post("/couriers")
+@router_private.post("/couriers")
 def couriers_create_ui(
     nome_resumido: str = Form(...),
     nome_completo: str = Form(default=""),
@@ -542,7 +585,7 @@ def couriers_create_ui(
     return _ui_redirect(f"/ui/couriers/{c.id}?ok=1")
 
 
-@router.post("/couriers/quick-create", response_class=HTMLResponse)
+@router_private.post("/couriers/quick-create", response_class=HTMLResponse)
 def couriers_quick_create_ui(
     request: Request,
     nome_resumido: str = Form(...),
@@ -565,7 +608,7 @@ def couriers_quick_create_ui(
     )
 
 
-@router.get("/couriers/{courier_id}", response_class=HTMLResponse)
+@router_private.get("/couriers/{courier_id}", response_class=HTMLResponse)
 def courier_detail_ui(request: Request, courier_id: str, db: Session = Depends(get_db)):
     c = db.query(Courier).filter(Courier.id == courier_id).first()
     if not c:
@@ -595,7 +638,7 @@ def courier_detail_ui(request: Request, courier_id: str, db: Session = Depends(g
     )
 
 
-@router.post("/couriers/{courier_id}")
+@router_private.post("/couriers/{courier_id}")
 def courier_patch_ui(
     courier_id: str,
     nome_resumido: str = Form(...),
@@ -615,7 +658,7 @@ def courier_patch_ui(
     return _ui_redirect(f"/ui/couriers/{courier_id}?ok=1")
 
 
-@router.post("/couriers/{courier_id}/aliases", response_class=HTMLResponse)
+@router_private.post("/couriers/{courier_id}/aliases", response_class=HTMLResponse)
 def courier_add_alias_ui(
     request: Request,
     courier_id: str,
@@ -630,7 +673,7 @@ def courier_add_alias_ui(
     )
 
 
-@router.post("/couriers/{courier_id}/aliases/{alias_id}/delete", response_class=HTMLResponse)
+@router_private.post("/couriers/{courier_id}/aliases/{alias_id}/delete", response_class=HTMLResponse)
 def courier_delete_alias_ui(request: Request, courier_id: str, alias_id: str, db: Session = Depends(get_db)):
     delete_alias(db, courier_id=courier_id, alias_id=alias_id)
     aliases = db.query(__import__("app.models", fromlist=["CourierAlias"]).CourierAlias).filter_by(courier_id=courier_id).order_by(
@@ -642,7 +685,7 @@ def courier_delete_alias_ui(request: Request, courier_id: str, alias_id: str, db
     )
 
 
-@router.post("/couriers/{courier_id}/payment")
+@router_private.post("/couriers/{courier_id}/payment")
 def courier_payment_ui(
     courier_id: str,
     key_type: str = Form(default=""),
@@ -653,3 +696,6 @@ def courier_payment_ui(
     body = CourierPaymentIn(key_type=key_type or None, key_value_raw=key_value_raw or None, bank=bank or None)
     upsert_payment(db, courier_id=courier_id, key_type=body.key_type, key_value_raw=body.key_value_raw, bank=body.bank)
     return _ui_redirect(f"/ui/couriers/{courier_id}?ok=1")
+
+
+router = router_private
