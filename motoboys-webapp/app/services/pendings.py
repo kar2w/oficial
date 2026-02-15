@@ -80,6 +80,11 @@ def resolve_yooga(db: Session, group_id: str, action: str, keep_ride_id: str | N
     if action == "KEEP_ONE":
         if not keep_ride_id:
             raise HTTPException(status_code=400, detail="keep_ride_id required")
+
+        keep_ride = next((r for r in rides if str(r.id) == keep_ride_id), None)
+        if keep_ride is None:
+            raise HTTPException(status_code=400, detail="keep_ride_id not found in group")
+
         for r in rides:
             if str(r.id) == keep_ride_id:
                 if r.courier_id is not None:

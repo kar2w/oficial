@@ -6,7 +6,7 @@ import pandas as pd
 from sqlalchemy.orm import Session
 from sqlalchemy.exc import IntegrityError
 
-from app.models import Import, Ride, YoogaReviewGroup, YoogaReviewItem
+from app.models import ImportLog, Ride, YoogaReviewGroup, YoogaReviewItem
 from app.services.week_service import get_or_create_week_for_date
 from app.services.courier_match import compute_fee_type, norm_text, match_courier_id
 
@@ -40,13 +40,13 @@ def _to_dt(x) -> dt.datetime | None:
 
 
 def import_yooga(db: Session, file_bytes: bytes, filename: str, file_hash: str) -> Tuple[str, int, int, int]:
-    imp = Import(source="YOOGA", filename=filename, file_hash=file_hash, status="DONE", meta={})
+    imp = ImportLog(source="YOOGA")
     db.add(imp)
     try:
         db.commit()
     except IntegrityError:
         db.rollback()
-        existing = db.query(Import).filter(Import.source == "YOOGA", Import.file_hash == file_hash).first()
+        existing = db.query(ImportLog).filter(ImportLog.source == "YOOGA").order_by(ImportLog.id.desc()).first()
         return str(existing.id), 0, 0, 0
     db.refresh(imp)
 
