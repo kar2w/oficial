@@ -6,6 +6,7 @@ from sqlalchemy import and_, case, func, or_, text as sa_text
 from sqlalchemy.orm import Session
 
 from app.models import Courier, LedgerEntry, Ride, Week, WeekPayout
+from app.services.week_service import validate_no_week_overlap
 
 
 _PENDING_STATUSES = {"PENDENTE_ATRIBUICAO", "PENDENTE_REVISAO", "PENDENTE_MATCH"}
@@ -168,6 +169,8 @@ def close_week(db: Session, week_id: str) -> Dict[str, Any]:
     w = get_week_or_404(db, week_id)
     if w.status != "OPEN":
         raise HTTPException(status_code=409, detail={"error": "WEEK_NOT_OPEN", "status": w.status})
+
+    validate_no_week_overlap(db, w.start_date, w.end_date, exclude_week_id=str(w.id))
 
     rows = compute_week_payout_preview(db, week_id)
 

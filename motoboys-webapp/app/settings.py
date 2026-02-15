@@ -35,6 +35,20 @@ def _default_user_data_dir() -> Path:
 _load_dotenvs()
 
 APP_ENV = os.getenv("APP_ENV", "dev").strip().lower()
+DB_MODE = os.getenv("DB_MODE", "server").strip().lower()
+if DB_MODE not in {"server", "desktop"}:
+    raise RuntimeError("Invalid DB_MODE. Use DB_MODE=server or DB_MODE=desktop")
+
+_db = os.getenv("DATABASE_URL", "").strip()
+if not _db:
+    raise RuntimeError("Missing DATABASE_URL. Configure DATABASE_URL.")
+
+if DB_MODE == "server":
+    if not (_db.lower().startswith("postgresql://") or _db.lower().startswith("postgresql+psycopg://")):
+        raise RuntimeError("Invalid DATABASE_URL for DB_MODE=server. Use postgresql+psycopg://...")
+else:
+    if not _db.lower().startswith("sqlite"):
+        raise RuntimeError("Invalid DATABASE_URL for DB_MODE=desktop. Use sqlite:///...")
 APP_MODE = os.getenv("APP_MODE", "server").strip().lower()
 
 if APP_MODE not in {"server", "desktop"}:
@@ -102,6 +116,7 @@ if APP_ENV == "prod":
 @dataclass(frozen=True)
 class Settings:
     APP_ENV: str
+    DB_MODE: str
     APP_MODE: str
     DATABASE_URL: str
     TZ: str
@@ -115,6 +130,7 @@ class Settings:
 
 settings = Settings(
     APP_ENV=APP_ENV,
+    DB_MODE=DB_MODE,
     APP_MODE=APP_MODE,
     DATABASE_URL=_db,
     TZ=_tz,
@@ -129,4 +145,3 @@ settings = Settings(
 DATABASE_URL = settings.DATABASE_URL
 APP_MODE = settings.APP_MODE
 TZ = settings.TZ
-WEEKLY_COURIERS_JSON_PATH = settings.WEEKLY_COURIERS_JSON_PATH
