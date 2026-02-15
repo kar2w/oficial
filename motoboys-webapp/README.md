@@ -16,42 +16,70 @@ MVP cobre:
 - Docker + Docker Compose
 - Python 3.11+
 
-## Rodar (Linux/Codespaces) a partir da raiz do repositório
+## Rodar (Linux/Codespaces) a partir da raiz do repositório (`/workspace/oficial`)
 ```bash
 cp .env.example .env
 python -m venv .venv
 source .venv/bin/activate
 pip install -r motoboys-webapp/requirements.txt
 
-# execute na raiz do repositório
-cd ..
 docker compose up -d
 
 # opcional: reaplicar schema em banco já existente
 docker exec -i motoboys-db psql -U postgres -d motoboys < ./db/schema.sql
 
-cd motoboys-webapp
-
 uvicorn --app-dir motoboys-webapp app.main:app --reload --host 0.0.0.0 --port 8000
 ```
 
-## Rodar (Windows PowerShell) a partir da raiz do repositório
+### Alternativa: rodar iniciando em `motoboys-webapp/`
+```bash
+cd motoboys-webapp
+cp .env.example .env
+python -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+
+# docker-compose e schema ficam na raiz do repositório
+cd ..
+docker compose up -d
+docker exec -i motoboys-db psql -U postgres -d motoboys < ./db/schema.sql
+
+# volte para a pasta da aplicação para comandos locais
+cd motoboys-webapp
+uvicorn --app-dir . app.main:app --reload --host 0.0.0.0 --port 8000
+```
+
+## Rodar (Windows PowerShell) a partir da raiz do repositório (`/workspace/oficial`)
 ```powershell
 copy .env.example .env
 python -m venv .venv
 .\.venv\Scripts\Activate.ps1
 pip install -r motoboys-webapp/requirements.txt
 
-# execute na raiz do repositório
-cd ..
 docker compose up -d
 
 # opcional: reaplicar schema em banco já existente
 docker exec -i motoboys-db psql -U postgres -d motoboys < .\db\schema.sql
 
-cd motoboys-webapp
-
 uvicorn --app-dir motoboys-webapp app.main:app --reload --host 0.0.0.0 --port 8000
+```
+
+### Alternativa: rodar iniciando em `motoboys-webapp/`
+```powershell
+cd motoboys-webapp
+copy .env.example .env
+python -m venv .venv
+.\.venv\Scripts\Activate.ps1
+pip install -r .\requirements.txt
+
+# docker-compose e schema ficam na raiz do repositório
+cd ..
+docker compose up -d
+docker exec -i motoboys-db psql -U postgres -d motoboys < .\db\schema.sql
+
+# volte para a pasta da aplicação para comandos locais
+cd motoboys-webapp
+uvicorn --app-dir . app.main:app --reload --host 0.0.0.0 --port 8000
 ```
 
 ### Bootstrap do banco
