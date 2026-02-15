@@ -1,4 +1,4 @@
-name: Smoke Check
+name: Desktop CI Checks
 
 on:
   push:
@@ -7,7 +7,7 @@ on:
   pull_request:
 
 jobs:
-  smoke:
+  desktop-checks:
     runs-on: ubuntu-latest
     env:
       DATABASE_URL: postgresql+psycopg://postgres:postgres@localhost:5432/motoboys
@@ -41,34 +41,6 @@ jobs:
         with:
           python-version: "3.11"
 
-      - name: Install dependencies
+      - name: Run desktop local pipeline (tests + smoke)
         run: |
-          python -m pip install --upgrade pip
-          pip install -r motoboys-webapp/requirements.txt
-
-      - name: Initialize database schema
-        run: |
-          psql "postgresql://postgres:postgres@localhost:5432/motoboys" -f db/schema.sql
-
-      - name: Start API
-        run: |
-          python -m uvicorn --app-dir motoboys-webapp app.main:app --host 0.0.0.0 --port 8000 > smoke-server.log 2>&1 &
-          echo $! > smoke-server.pid
-
-      - name: Run smoke check (DB + /healthz)
-        run: |
-          python motoboys-webapp/scripts/smoke.py --health-url http://127.0.0.1:8000/healthz --health-retries 30 --health-sleep 1
-
-      - name: Stop API
-        if: always()
-        run: |
-          if [ -f smoke-server.pid ]; then
-            kill "$(cat smoke-server.pid)" || true
-          fi
-
-      - name: Upload server log
-        if: failure()
-        uses: actions/upload-artifact@v4
-        with:
-          name: smoke-server-log
-          path: smoke-server.log
+          ./scripts/ci_desktop_local.sh
