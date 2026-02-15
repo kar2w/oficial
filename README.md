@@ -49,3 +49,7 @@ Reset de senha via CLI:
 python scripts/reset_passwords.py --env .env --rotate-admin
 python scripts/reset_passwords.py --env .env --rotate-all
 ```
+
+## Desktop build (Windows)
+
+Veja `motoboys-webapp/desktop/` e a seção **Desktop (Windows)** em `motoboys-webapp/README.md` para gerar `MotoboysWebApp.exe` com PyInstaller, incluindo templates/static/assets e metadata de versão.

@@ -5,6 +5,9 @@ from pathlib import Path
 from dotenv import load_dotenv
 
 
+APP_DIR_NAME = "MotoboysWebApp"
+
+
 def _load_dotenvs() -> None:
     load_dotenv(override=False)
     here = Path(__file__).resolve()
@@ -17,6 +20,14 @@ def _parse_cors_origins(raw: str | None) -> list[str]:
     if not raw or not raw.strip():
         return ["*"]
     return [x.strip() for x in raw.split(",") if x.strip()]
+
+
+def _default_user_data_dir() -> Path:
+    if os.name == "nt":
+        base = Path(os.getenv("LOCALAPPDATA", Path.home() / "AppData" / "Local"))
+    else:
+        base = Path(os.getenv("XDG_DATA_HOME", Path.home() / ".local" / "share"))
+    return base / APP_DIR_NAME
 
 
 _load_dotenvs()
@@ -34,6 +45,12 @@ if _db.lower().startswith("sqlite") or not (
 
 _tz = os.getenv("TZ", "America/Fortaleza")
 os.environ.setdefault("TZ", _tz)
+
+_default_user_data = _default_user_data_dir()
+_user_data_dir = Path(os.getenv("USER_DATA_DIR", str(_default_user_data))).expanduser().resolve()
+_log_dir = Path(os.getenv("LOG_DIR", str(_user_data_dir / "logs"))).expanduser().resolve()
+_user_data_dir.mkdir(parents=True, exist_ok=True)
+_log_dir.mkdir(parents=True, exist_ok=True)
 
 _here = Path(__file__).resolve()
 _default_weekly = str((_here.parents[1] / "data" / "entregadores_semanais.json").resolve())
@@ -63,6 +80,8 @@ class Settings:
     DATABASE_URL: str
     TZ: str
     cors_origins_list: list[str]
+    USER_DATA_DIR: str
+    LOG_DIR: str
     WEEKLY_COURIERS_JSON_PATH: str
     SESSION_SECRET: str
     ADMIN_USERNAME: str
@@ -76,6 +95,8 @@ settings = Settings(
     DATABASE_URL=_db,
     TZ=_tz,
     cors_origins_list=_parse_cors_origins(os.getenv("CORS_ORIGINS")),
+    USER_DATA_DIR=str(_user_data_dir),
+    LOG_DIR=str(_log_dir),
     WEEKLY_COURIERS_JSON_PATH=_weekly_path,
     SESSION_SECRET=_session_secret,
     ADMIN_USERNAME=_admin_user,
