@@ -57,10 +57,19 @@ _configure_local_logging()
 
 app = FastAPI(title="Motoboys WebApp API")
 
+cors_origins = settings.cors_origins_list
+allow_credentials = bool(cors_origins)
+
+if not cors_origins:
+    logging.warning(
+        "CORS_ORIGINS is not configured; CORS credentials are disabled. "
+        "Set explicit origins (comma-separated) to enable cookies/auth headers."
+    )
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=settings.cors_origins_list,
-    allow_credentials=True,
+    allow_origins=cors_origins,
+    allow_credentials=allow_credentials,
     allow_methods=["*"],
     allow_headers=["*"],
 )
