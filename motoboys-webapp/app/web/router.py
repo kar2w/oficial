@@ -1,7 +1,6 @@
 import datetime as dt
 from pathlib import Path
 from typing import Any, Optional
-import hmac
 import time
 from collections import defaultdict
 import urllib.parse
@@ -16,7 +15,7 @@ from sqlalchemy import func, text as sa_text
 from app.db import get_db
 from app.models import Import, Ride
 from app.schemas import CourierPaymentIn
-from app.settings import settings
+from app.settings import auth_provider, settings
 
 from app.services.audit import log_event, list_audit
 
@@ -173,6 +172,9 @@ def _rl_clear(key: str) -> None:
 # -----------------------------
 @router_public.get("/login", response_class=HTMLResponse)
 def login_page(request: Request, next: str | None = Query(default=None)):
+    if auth_provider.needs_initial_setup():
+        return _ui_redirect("/ui/setup-inicial")
+
     # If already logged, go to next
     if request.session.get("user"):
         role = request.session.get("role")
@@ -181,7 +183,12 @@ def login_page(request: Request, next: str | None = Query(default=None)):
 
     return templates.TemplateResponse(
         "login.html",
-        {"request": request, "next": next or "/ui/imports/new", "error": None},
+        {
+            "request": request,
+            "next": next or "/ui/imports/new",
+            "error": None,
+            "desktop_mode": settings.DESKTOP_MODE,
+        },
     )
 
 
@@ -192,6 +199,9 @@ def login_post(
     password: str = Form(...),
     next: str = Form(default="/ui/imports/new"),
 ):
+    if auth_provider.needs_initial_setup():
+        return _ui_redirect("/ui/setup-inicial")
+
     u = username.strip()
 
     ip = request.client.host if request.client else "unknown"
@@ -211,16 +221,13 @@ def login_post(
                 "request": request,
                 "next": next or "/ui/imports/new",
                 "error": f"Muitas tentativas. Aguarde ~{retry_after}s e tente novamente.",
+                "desktop_mode": settings.DESKTOP_MODE,
             },
             status_code=429,
             headers={"Retry-After": str(retry_after)},
         )
 
-    role = None
-    if hmac.compare_digest(u, settings.ADMIN_USERNAME) and hmac.compare_digest(password, settings.ADMIN_PASSWORD):
-        role = "ADMIN"
-    elif hmac.compare_digest(u, settings.CASHIER_USERNAME) and hmac.compare_digest(password, settings.CASHIER_PASSWORD):
-        role = "CASHIER"
+    role = auth_provider.verify_credentials(u, password)
 
     if role:
         request.session["user"] = u
@@ -245,9 +252,101 @@ def login_post(
 
     return templates.TemplateResponse(
         "login.html",
-        {"request": request, "next": next or "/ui/imports/new", "error": "Credenciais inválidas."},
+        {
+            "request": request,
+            "next": next or "/ui/imports/new",
+            "error": "Credenciais inválidas.",
+            "desktop_mode": settings.DESKTOP_MODE,
+        },
         status_code=401,
     )
+
+
+@router_public.get("/setup-inicial", response_class=HTMLResponse)
+def setup_inicial_page(request: Request):
+    if not settings.DESKTOP_MODE:
+        return _ui_redirect("/ui/login")
+
+    if not auth_provider.needs_initial_setup():
+        return _ui_redirect("/ui/login?ok=1&msg=Setup%20inicial%20j%C3%A1%20realizado")
+
+    return templates.TemplateResponse(
+        "setup_inicial.html",
+        {"request": request, "error": None},
+    )
+
+
+@router_public.post("/setup-inicial", response_class=HTMLResponse)
+def setup_inicial_post(
+    request: Request,
+    db: Session = Depends(get_db),
+    admin_username: str = Form(...),
+    admin_password: str = Form(...),
+    admin_password_confirm: str = Form(...),
+    cashier_username: str = Form(...),
+    cashier_password: str = Form(...),
+    cashier_password_confirm: str = Form(...),
+):
+    if not settings.DESKTOP_MODE:
+        return _ui_redirect("/ui/login")
+
+    if not auth_provider.needs_initial_setup():
+        return _ui_redirect("/ui/login?ok=1&msg=Setup%20inicial%20j%C3%A1%20realizado")
+
+    admin_username = admin_username.strip()
+    cashier_username = cashier_username.strip()
+
+    if not admin_username or not cashier_username:
+        return templates.TemplateResponse(
+            "setup_inicial.html",
+            {"request": request, "error": "Usuários não podem ficar vazios."},
+            status_code=400,
+        )
+
+    if admin_password != admin_password_confirm or cashier_password != cashier_password_confirm:
+        return templates.TemplateResponse(
+            "setup_inicial.html",
+            {"request": request, "error": "As confirmações de senha não conferem."},
+            status_code=400,
+        )
+
+    if len(admin_password) < 6 or len(cashier_password) < 6:
+        return templates.TemplateResponse(
+            "setup_inicial.html",
+            {"request": request, "error": "As senhas devem ter no mínimo 6 caracteres."},
+            status_code=400,
+        )
+
+    if admin_password == "admin" or cashier_password == "caixa":
+        return templates.TemplateResponse(
+            "setup_inicial.html",
+            {"request": request, "error": "Troque as credenciais padrão para concluir o setup."},
+            status_code=400,
+        )
+
+    auth_provider.save_initial_credentials(
+        admin_username=admin_username,
+        admin_password=admin_password,
+        cashier_username=cashier_username,
+        cashier_password=cashier_password,
+        sensitive_config={"desktop_mode": True},
+    )
+
+    ip = request.client.host if request.client else None
+    log_event(
+        db,
+        actor="setup-inicial",
+        role="SYSTEM",
+        ip=ip,
+        action="AUTH_INITIAL_SETUP_COMPLETED",
+        entity_type="LOCAL_CONFIG",
+        meta={
+            "changed_credentials": ["ADMIN", "CASHIER"],
+            "changed_sensitive_config": ["desktop_mode"],
+        },
+    )
+
+    return _ui_redirect("/ui/login?ok=1&msg=Setup%20inicial%20conclu%C3%ADdo")
 
 
 @router_public.post("/logout")

@@ -1,4 +1,5 @@
 import datetime as dt
+import logging
 from pathlib import Path
 
 from fastapi import Depends, FastAPI, File, Form, HTTPException, Query, Response, UploadFile
@@ -40,6 +41,19 @@ from app.services.utils import read_upload_bytes, sha256_bytes
 from app.services.week_service import get_current_week, get_open_week_for_date
 from app.settings import settings
 from app.web.router import router_public, router_private, router_admin
+
+def _configure_local_logging() -> None:
+    log_path = Path(settings.LOG_DIR) / "app.log"
+    handlers: list[logging.Handler] = [logging.StreamHandler()]
+    handlers.append(logging.FileHandler(log_path, encoding="utf-8"))
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s %(levelname)s [%(name)s] %(message)s",
+        handlers=handlers,
+    )
+
+
+_configure_local_logging()
 
 app = FastAPI(title="Motoboys WebApp API")
 
