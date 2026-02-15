@@ -1,7 +1,10 @@
 import datetime as dt
+from pathlib import Path
 
 from fastapi import Depends, FastAPI, File, Form, HTTPException, Query, Response, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
+from fastapi.responses import RedirectResponse
 from sqlalchemy import func, text as sa_text
 from sqlalchemy.orm import Session
 
@@ -35,6 +38,7 @@ from app.services.seed import seed_weekly_couriers
 from app.services.utils import read_upload_bytes, sha256_bytes
 from app.services.week_service import get_current_week, get_open_week_for_date
 from app.settings import settings
+from app.web.router import router as web_router
 
 app = FastAPI(title="Motoboys WebApp API")
 
@@ -45,6 +49,22 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+
+# -------------------------
+# Web UI (Jinja2 + HTMX)
+# -------------------------
+BASE_DIR = Path(__file__).resolve().parent
+STATIC_DIR = BASE_DIR / "web" / "static"
+if STATIC_DIR.exists():
+    app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
+
+app.include_router(web_router)
+
+@app.get("/", include_in_schema=False)
+def root_redirect():
+    return RedirectResponse(url="/ui/imports/new", status_code=302)
 
 
 def _couriers_to_out(db: Session, couriers):
