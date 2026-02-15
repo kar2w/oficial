@@ -119,8 +119,13 @@ class AuthProvider:
         return payload
 
 
-def build_auth_provider(*, app_env: str) -> AuthProvider:
-    desktop_mode = app_env == "desktop" or os.getenv("DESKTOP_MODE", "").strip().lower() in {"1", "true", "yes"}
+def build_auth_provider(*, app_mode: str | None = None, app_env: str | None = None) -> AuthProvider:
+    resolved_app_mode = (app_mode or os.getenv("APP_MODE", "server")).strip().lower()
+    if resolved_app_mode not in {"server", "desktop"}:
+        resolved_app_mode = "server"
+
+    desktop_mode_override = os.getenv("DESKTOP_MODE", "").strip().lower() in {"1", "true", "yes"}
+    desktop_mode = resolved_app_mode == "desktop" or desktop_mode_override
     defaults = AuthDefaults(
         admin_username=os.getenv("ADMIN_USERNAME", "admin").strip() or "admin",
         admin_password=os.getenv("ADMIN_PASSWORD", "admin").strip() or "admin",

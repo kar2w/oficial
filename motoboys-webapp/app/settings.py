@@ -44,7 +44,7 @@ if APP_MODE not in {"server", "desktop"}:
     raise RuntimeError("Invalid APP_MODE. Use APP_MODE=server or APP_MODE=desktop.")
 
 
-auth_provider = build_auth_provider(app_env=APP_ENV)
+auth_provider = build_auth_provider(app_mode=APP_MODE, app_env=APP_ENV)
 
 
 def _resolve_database_url() -> str:
