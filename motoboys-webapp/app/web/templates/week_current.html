@@ -42,19 +42,20 @@
     <div class="actions">
       <form method="post" action="/ui/weeks/{{ week_id }}/close" data-confirm="Fechar a semana {{ week.start_date }} → {{ week.end_date }}? Isso cria o snapshot de pagamentos." data-loading="global">
         <button class="btn" type="submit"
-          {% if pending_total > 0 or week.status != 'OPEN' %}disabled{% endif %}
-          title="{% if week.status != 'OPEN' %}Semana não está aberta{% elif pending_total>0 %}Resolva as pendências antes{% endif %}">
+          {% if role != 'ADMIN' or pending_total > 0 or week.status != 'OPEN' %}disabled{% endif %}
+          title="{% if role != 'ADMIN' %}Somente ADMIN{% elif week.status != 'OPEN' %}Semana não está aberta{% elif pending_total>0 %}Resolva as pendências antes{% endif %}">
           Fechar semana
         </button>
       </form>
 
       <form method="post" action="/ui/weeks/{{ week_id }}/pay" data-confirm="Marcar como PAGA? (recomendado só após transferências/Pix feitos)" data-loading="global">
-        <button class="btn btn--ghost" type="submit" {% if week.status != 'CLOSED' %}disabled{% endif %} title="Feche a semana primeiro">
+        <button class="btn btn--ghost" type="submit" {% if role != 'ADMIN' or week.status != 'CLOSED' %}disabled{% endif %} title="{% if role != 'ADMIN' %}Somente ADMIN{% else %}Feche a semana primeiro{% endif %}">
           Marcar como paga
         </button>
       </form>
 
       <a class="btn btn--ghost" href="/weeks/{{ week_id }}/payouts.csv">Exportar pagamentos (CSV)</a>
+      <a class="btn btn--ghost" href="/weeks/{{ week_id }}/payouts_pix.csv">Exportar PIX (CSV)</a>
     </div>
   </section>
 

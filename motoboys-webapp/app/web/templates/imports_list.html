@@ -3,8 +3,10 @@
 {% set title="Imports" %}
 {% block content %}
   <header class="pagehead">
-    <h1>Imports</h1>
-    <p class="muted">Últimos imports processados.</p>
+    <h1>Últimos imports</h1>
+    <div class="actions">
+      <a class="btn" href="/ui/imports/new">Novo import</a>
+    </div>
   </header>
 
   <section class="card">
@@ -13,14 +15,21 @@
         <span>Fonte</span>
         <select name="source" onchange="this.form.submit()">
           <option value="" {% if not source %}selected{% endif %}>(todas)</option>
-          <option value="SAIPOS" {% if source=="SAIPOS" %}selected{% endif %}>SAIPOS</option>
-          <option value="YOOGA" {% if source=="YOOGA" %}selected{% endif %}>YOOGA</option>
+          <option value="SAIPOS" {% if source=='SAIPOS' %}selected{% endif %}>SAIPOS</option>
+          <option value="YOOGA" {% if source=='YOOGA' %}selected{% endif %}>YOOGA</option>
         </select>
       </label>
 
-      <div class="actions">
-        <a class="btn btn--ghost" href="/ui/imports/new">Novo import</a>
-      </div>
+      <label class="field field--inline">
+        <span>Itens por página</span>
+        <select name="page_size" onchange="this.form.submit()">
+          {% for s in [20,50,100,200] %}
+            <option value="{{ s }}" {% if page_size==s %}selected{% endif %}>{{ s }}</option>
+          {% endfor %}
+        </select>
+      </label>
+
+      <input type="hidden" name="page" value="1" />
     </form>
 
     <table class="table">
@@ -34,13 +43,13 @@
         </tr>
       </thead>
       <tbody>
-        {% for it in imports %}
+        {% for i in imports %}
           <tr>
-            <td class="mono">{{ it.imported_at }}</td>
-            <td>{{ it.source }}</td>
-            <td class="mono">{{ it.filename }}</td>
-            <td class="mono">{{ it.status }}</td>
-            <td><a class="btn btn--small btn--ghost" href="/ui/imports/{{ it.id }}">Detalhes</a></td>
+            <td class="mono">{{ i.imported_at or "-" }}</td>
+            <td>{{ i.source }}</td>
+            <td class="mono">{{ i.filename }}</td>
+            <td>{{ i.status }}</td>
+            <td><a href="/ui/imports/{{ i.id }}">Detalhes</a></td>
           </tr>
         {% endfor %}
         {% if not imports %}
@@ -48,5 +57,22 @@
         {% endif %}
       </tbody>
     </table>
+
+    <div class="actions" style="margin-top:12px; justify-content:space-between;">
+      <div class="muted">Página <span class="mono">{{ page }}</span></div>
+      <div class="actions">
+        {% if has_prev %}
+          <a class="btn btn--ghost" href="/ui/imports?page={{ page-1 }}{% if qs_common %}&{{ qs_common }}{% endif %}">← Anterior</a>
+        {% else %}
+          <span class="btn btn--ghost" style="opacity:.45; pointer-events:none">← Anterior</span>
+        {% endif %}
+
+        {% if has_next %}
+          <a class="btn btn--ghost" href="/ui/imports?page={{ page+1 }}{% if qs_common %}&{{ qs_common }}{% endif %}">Próxima →</a>
+        {% else %}
+          <span class="btn btn--ghost" style="opacity:.45; pointer-events:none">Próxima →</span>
+        {% endif %}
+      </div>
+    </div>
   </section>
 {% endblock %}

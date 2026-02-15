@@ -1,0 +1,93 @@
+{% extends 'base.html' %}
+{% set nav='audit' %}
+
+{% block content %}
+  <section class="card">
+    <h1>Auditoria</h1>
+    <p class="muted">Log de ações feitas pela UI (imports, fechamento/pagamento, entregadores, pendências).</p>
+
+    <form method="get" action="/ui/audit" class="filters" style="margin-top:14px">
+      <div class="filters__row">
+        <div class="field">
+          <label>Ator</label>
+          <input class="input" type="text" name="actor" value="{{ actor }}" placeholder="admin / caixa" />
+        </div>
+        <div class="field">
+          <label>Ação</label>
+          <input class="input" type="text" name="action" value="{{ action }}" placeholder="WEEK_CLOSED" />
+        </div>
+        <div class="field">
+          <label>Itens por página</label>
+          <input class="input" type="number" name="page_size" value="{{ page_size }}" min="1" max="500" />
+        </div>
+        <input type="hidden" name="page" value="1" />
+        <div class="field" style="align-self:flex-end">
+          <button class="btn" type="submit">Filtrar</button>
+          <a class="btn btn--ghost" href="/ui/audit">Limpar</a>
+        </div>
+      </div>
+    </form>
+
+    <div style="margin-top:14px" class="muted">
+      Mostrando {{ rows|length }} evento(s). Página <span class="mono">{{ page }}</span>.
+    </div>
+
+    <table class="table" style="margin-top:10px">
+      <thead>
+        <tr>
+          <th>Quando</th>
+          <th>Ator</th>
+          <th>Ação</th>
+          <th>Entidade</th>
+          <th>Detalhes</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for r in rows %}
+          <tr>
+            <td class="mono">{{ (r.created_at|string)[:19].replace('T',' ') }}</td>
+            <td>
+              <div><strong>{{ r.actor }}</strong></div>
+              <div class="muted" style="font-size:12px">{{ r.role or '' }}{% if r.ip %} · {{ r.ip }}{% endif %}</div>
+            </td>
+            <td class="mono"><strong>{{ r.action }}</strong></td>
+            <td class="mono">
+              {% if r.entity_type %}{{ r.entity_type }}{% else %}-{% endif %}
+              {% if r.entity_id %}<div class="muted" style="font-size:12px">{{ r.entity_id }}</div>{% endif %}
+            </td>
+            <td>
+              {% if r.meta %}
+                <details>
+                  <summary class="muted">ver</summary>
+                  <pre class="pre" style="max-width:520px; white-space:pre-wrap">{{ r.meta | tojson(indent=2) }}</pre>
+                </details>
+              {% else %}
+                <span class="muted">-</span>
+              {% endif %}
+            </td>
+          </tr>
+        {% endfor %}
+        {% if not rows %}
+          <tr><td colspan="5" class="muted">Sem eventos.</td></tr>
+        {% endif %}
+      </tbody>
+    </table>
+
+    <div class="actions" style="margin-top:12px; justify-content:space-between;">
+      <div class="muted">Página <span class="mono">{{ page }}</span></div>
+      <div class="actions">
+        {% if has_prev %}
+          <a class="btn btn--ghost" href="/ui/audit?page={{ page-1 }}{% if qs_common %}&{{ qs_common }}{% endif %}">← Anterior</a>
+        {% else %}
+          <span class="btn btn--ghost" style="opacity:.45; pointer-events:none">← Anterior</span>
+        {% endif %}
+
+        {% if has_next %}
+          <a class="btn btn--ghost" href="/ui/audit?page={{ page+1 }}{% if qs_common %}&{{ qs_common }}{% endif %}">Próxima →</a>
+        {% else %}
+          <span class="btn btn--ghost" style="opacity:.45; pointer-events:none">Próxima →</span>
+        {% endif %}
+      </div>
+    </div>
+  </section>
+{% endblock %}

@@ -4,6 +4,7 @@ from .import_log import Import
 from .ledger import LedgerEntry
 from .ride import Ride, YoogaReviewGroup, YoogaReviewItem
 from .week import Week, WeekPayout
+from .audit_log import AuditLog
 
 __all__ = [
     "Base",
@@ -18,4 +19,5 @@ __all__ = [
     "YoogaReviewGroup",
     "YoogaReviewItem",
     "WeekPayout",
+    "AuditLog",
 ]
