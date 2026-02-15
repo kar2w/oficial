@@ -39,7 +39,7 @@ from app.services.seed import seed_weekly_couriers
 from app.services.utils import read_upload_bytes, sha256_bytes
 from app.services.week_service import get_current_week, get_open_week_for_date
 from app.settings import settings
-from app.web.router import router_private, router_public
+from app.web.router import router_public, router_private, router_admin
 
 app = FastAPI(title="Motoboys WebApp API")
 
@@ -50,7 +50,8 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
-app.add_middleware(SessionMiddleware, secret_key=settings.SESSION_SECRET)
+
+
 
 # -------------------------
 # Web UI (Jinja2 + HTMX)
@@ -60,12 +61,27 @@ STATIC_DIR = BASE_DIR / "web" / "static"
 if STATIC_DIR.exists():
     app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 
+app.add_middleware(
+    SessionMiddleware,
+    secret_key=settings.SESSION_SECRET,
+    same_site="lax",
+    https_only=(settings.APP_ENV == "prod"),
+)
+
 app.include_router(router_public)
 app.include_router(router_private)
+app.include_router(router_admin)
 
 @app.get("/", include_in_schema=False)
 def root_redirect():
     return RedirectResponse(url="/ui/login", status_code=302)
+
+@app.get("/healthz", include_in_schema=False)
+def healthz(db: Session = Depends(get_db)):
+    # DB ping for docker healthcheck
+    db.execute(sa_text("SELECT 1"))
+    return {"ok": True}
+
 
 
 def _couriers_to_out(db: Session, couriers):
@@ -108,12 +124,6 @@ def _couriers_to_out(db: Session, couriers):
 
 @app.get("/health")
 def health(db: Session = Depends(get_db)):
-    db.execute(sa_text("SELECT 1"))
-    return {"ok": True}
-
-
-@app.get("/healthz")
-def healthz(db: Session = Depends(get_db)):
     db.execute(sa_text("SELECT 1"))
     return {"ok": True}
 
@@ -246,6 +256,7 @@ def week_payout_snapshot(week_id: str, db: Session = Depends(get_db)):
 def week_payout_csv(week_id: str, db: Session = Depends(get_db)):
     import csv
     import io
+    import uuid
 
     w = get_week_or_404(db, week_id)
     if w.status in ("CLOSED", "PAID"):
@@ -330,54 +341,85 @@ def week_payout_pix_csv(week_id: str, db: Session = Depends(get_db)):
     """CSV pronto pra repassar ao caixa: inclui chave PIX/banco e valor líquido."""
     import csv
     import io
+    import uuid
 
     w = get_week_or_404(db, week_id)
-    if w.status in ("CLOSED", "PAID"):
-        rows = db.execute(
-            sa_text(
-                """
-                SELECT wp.courier_nome, wp.courier_id::text AS courier_id, wp.net_amount,
-                       cp.key_type, cp.key_value_raw, cp.bank,
-                       :ws AS week_start, :we AS week_end, :st AS week_status
-                  FROM week_payouts wp
-             LEFT JOIN courier_payment cp ON cp.courier_id = wp.courier_id
-                 WHERE wp.week_id = :week_id
-                 ORDER BY wp.courier_nome
-                """
-            ),
-            {"week_id": week_id, "ws": str(w.start_date), "we": str(w.end_date), "st": w.status},
-        ).mappings().all()
-        data_rows = [dict(r) for r in rows]
-    else:
-        preview = compute_week_payout_preview(db, week_id)
-        data_rows = []
-        for r in preview:
-            cid = r.get("courier_id")
-            pay = None
-            if cid:
-                pay = db.query(CourierPayment).filter(CourierPayment.courier_id == cid).first()
-            data_rows.append(
-                {
-                    "courier_nome": r.get("courier_nome"),
-                    "courier_id": str(cid) if cid else "",
-                    "net_amount": r.get("net_amount"),
-                    "key_type": pay.key_type if pay else None,
-                    "key_value_raw": pay.key_value_raw if pay else None,
-                    "bank": pay.bank if pay else None,
-                    "week_start": str(w.start_date),
-                    "week_end": str(w.end_date),
-                    "week_status": w.status,
-                }
-            )
 
-    header = ["courier_nome", "courier_id", "net_amount", "key_type", "key_value_raw", "bank", "week_start", "week_end", "week_status"]
+    # Use snapshot if week already closed/paid; otherwise preview
+    if w.status in ("CLOSED", "PAID"):
+        rows = get_payout_snapshot(db, week_id)
+        preview_rows = [
+            {
+                "courier_id": r.get("courier_id"),
+                "courier_nome": r.get("courier_nome"),
+                "net_amount": float(r.get("net_amount") or 0),
+            }
+            for r in rows
+        ]
+    else:
+        rows = compute_week_payout_preview(db, week_id)
+        preview_rows = [
+            {
+                "courier_id": str(r.get("courier_id")) if r.get("courier_id") is not None else "",
+                "courier_nome": r.get("courier_nome"),
+                "net_amount": float(r.get("net_amount") or 0),
+            }
+            for r in rows
+        ]
+
+    courier_ids_str = [r["courier_id"] for r in preview_rows if r.get("courier_id")]
+    courier_ids: list[uuid.UUID] = []
+    for cid in courier_ids_str:
+        try:
+            courier_ids.append(uuid.UUID(str(cid)))
+        except Exception:
+            continue
+    pay_by: dict[str, dict] = {}
+    if courier_ids:
+        for pmt in db.query(CourierPayment).filter(CourierPayment.courier_id.in_(courier_ids)).all():
+            pay_by[str(pmt.courier_id)] = {
+                "key_type": pmt.key_type or "",
+                "key_value_raw": pmt.key_value_raw or "",
+                "bank": pmt.bank or "",
+            }
+
+    header = [
+        "courier_nome",
+        "courier_id",
+        "net_amount",
+        "key_type",
+        "key_value_raw",
+        "bank",
+        "week_start",
+        "week_end",
+        "week_status",
+    ]
+
+    data_rows = []
+    for r in preview_rows:
+        cid = r.get("courier_id") or ""
+        pay = pay_by.get(str(cid), {})
+        data_rows.append(
+            {
+                "courier_nome": r.get("courier_nome") or "",
+                "courier_id": cid,
+                "net_amount": f"{float(r.get('net_amount') or 0):.2f}",
+                "key_type": pay.get("key_type", ""),
+                "key_value_raw": pay.get("key_value_raw", ""),
+                "bank": pay.get("bank", ""),
+                "week_start": str(w.start_date),
+                "week_end": str(w.end_date),
+                "week_status": w.status,
+            }
+        )
+
     buf = io.StringIO()
     wr = csv.DictWriter(buf, fieldnames=header)
     wr.writeheader()
     for row in data_rows:
         wr.writerow(row)
 
-    filename = f"week_{w.start_date}_to_{w.end_date}_payouts_pix.csv"
+    filename = f"week_{w.start_date}_to_{w.end_date}_pix.csv"
     return Response(
         content=buf.getvalue(),
         media_type="text/csv",
