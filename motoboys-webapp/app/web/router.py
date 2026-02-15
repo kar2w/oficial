@@ -1,24 +1,32 @@
 import datetime as dt
 from pathlib import Path
 from typing import Any
+from urllib.parse import quote
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile
-from fastapi.responses import HTMLResponse, RedirectResponse, Response
-from fastapi.templating import Jinja2Templates
 from fastapi.requests import Request
-from sqlalchemy.orm import Session
+from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.templating import Jinja2Templates
 from sqlalchemy import func, text as sa_text
+from sqlalchemy.orm import Session
 
 from app.db import get_db
-from app.models import Import, Ride, Courier, CourierAlias, CourierPayment
-from app.services.couriers import create_courier, list_couriers, patch_courier, add_alias, delete_alias, upsert_payment
+from app.models import Courier, CourierAlias, CourierPayment, Import, Ride
+from app.schemas import CourierPaymentIn
+from app.services.couriers import (
+    add_alias,
+    create_courier,
+    delete_alias,
+    list_couriers,
+    patch_courier,
+    upsert_payment,
+)
 from app.services.import_saipos import import_saipos
 from app.services.import_yooga import import_yooga
-from app.services.payouts import close_week, compute_week_payout_preview, pay_week, get_week_or_404
-from app.services.pendings import list_assignment, assign_ride, list_yooga_groups, yooga_group_items, resolve_yooga
+from app.services.payouts import close_week, compute_week_payout_preview, get_week_or_404, pay_week
+from app.services.pendings import assign_ride, list_assignment, list_yooga_groups, resolve_yooga, yooga_group_items
 from app.services.utils import read_upload_bytes, sha256_bytes
 from app.services.week_service import get_open_week_for_date
-from app.schemas import CourierPaymentIn
 
 BASE_DIR = Path(__file__).resolve().parent
 templates = Jinja2Templates(directory=str(BASE_DIR / "templates"))
@@ -30,14 +38,56 @@ def _ui_redirect(url: str) -> RedirectResponse:
     return RedirectResponse(url=url, status_code=303)
 
 
+def _friendly_error_message(exc: Exception) -> str:
+    """Convert backend exceptions into short UI-friendly strings."""
+
+    if isinstance(exc, HTTPException):
+        detail = exc.detail
+
+        if isinstance(detail, dict):
+            code = detail.get("error")
+            if code == "MISSING_REQUIRED_COLUMNS":
+                missing = detail.get("missing") or []
+                src = detail.get("source") or ""
+                return f"Colunas obrigatórias ausentes ({src}): {', '.join(missing)}"
+
+            if code == "WEEK_NOT_OPEN":
+                return f"Semana não está aberta (status atual: {detail.get('status')})."
+
+            if code == "WEEK_NOT_CLOSED":
+                return f"Semana não está fechada (status atual: {detail.get('status')})."
+
+            if code == "WEEK_HAS_PENDINGS":
+                pending_total = detail.get("pending_total")
+                unassigned = detail.get("unassigned_ok_rides")
+                parts = []
+                if pending_total:
+                    parts.append(f"{pending_total} pendência(s) aberta(s)")
+                if unassigned:
+                    parts.append(f"{unassigned} ride(s) OK sem motoboy")
+                suffix = "; ".join(parts) if parts else "pendências abertas"
+                return f"Não dá pra fechar: {suffix}."
+
+            return str(detail)
+
+        if isinstance(detail, str):
+            return detail
+
+        return str(detail)
+
+    return str(exc)
+
+
 def _list_weeks(db: Session):
-    rows = db.execute(sa_text(
-        """
+    rows = db.execute(
+        sa_text(
+            """
         SELECT id, start_date, end_date, status, closing_seq
         FROM weeks
         ORDER BY start_date DESC
         """
-    )).mappings().all()
+        )
+    ).mappings().all()
     return [dict(r) for r in rows]
 
 
@@ -46,14 +96,11 @@ def ui_home():
     return _ui_redirect("/ui/imports/new")
 
 
-# -----------------------------
-# Imports UI
-# -----------------------------
 @router.get("/imports/new", response_class=HTMLResponse)
 def imports_new(request: Request):
     return templates.TemplateResponse(
         "imports_new.html",
-        {"request": request, "result": None},
+        {"request": request, "result": None, "error": None},
     )
 
 
@@ -68,33 +115,42 @@ async def imports_new_post(
     if source not in ("SAIPOS", "YOOGA"):
         raise HTTPException(status_code=400, detail="source must be SAIPOS or YOOGA")
 
-    data = await read_upload_bytes(file)
-    file_hash = sha256_bytes(data)
+    try:
+        data = await read_upload_bytes(file)
+        file_hash = sha256_bytes(data)
+        existing = db.query(Import).filter(Import.source == source, Import.file_hash == file_hash).first()
 
-    if source == "SAIPOS":
-        import_id, inserted, pend_assign, pend_review, redirected_closed_week, week_ids_touched = import_saipos(
-            db, data, file.filename, file_hash
+        if source == "SAIPOS":
+            import_id, inserted, pend_assign, pend_review, redirected_closed_week, week_ids_touched = import_saipos(
+                db, data, file.filename, file_hash
+            )
+        else:
+            import_id, inserted, pend_assign, pend_review, redirected_closed_week, week_ids_touched = import_yooga(
+                db, data, file.filename, file_hash
+            )
+
+        result = {
+            "import_id": import_id,
+            "source": source,
+            "filename": file.filename,
+            "inserted": inserted,
+            "pendente_atribuicao": pend_assign,
+            "pendente_revisao": pend_review,
+            "redirected_closed_week": redirected_closed_week,
+            "week_ids_touched": week_ids_touched,
+            "is_duplicate": existing is not None,
+        }
+
+        return templates.TemplateResponse(
+            "imports_new.html",
+            {"request": request, "result": result, "error": None},
         )
-    else:
-        import_id, inserted, pend_assign, pend_review, redirected_closed_week, week_ids_touched = import_yooga(
-            db, data, file.filename, file_hash
+    except Exception as exc:
+        return templates.TemplateResponse(
+            "imports_new.html",
+            {"request": request, "result": None, "error": _friendly_error_message(exc)},
+            status_code=400,
         )
-
-    result = {
-        "import_id": import_id,
-        "source": source,
-        "filename": file.filename,
-        "inserted": inserted,
-        "pendente_atribuicao": pend_assign,
-        "pendente_revisao": pend_review,
-        "redirected_closed_week": redirected_closed_week,
-        "week_ids_touched": week_ids_touched,
-    }
-
-    return templates.TemplateResponse(
-        "imports_new.html",
-        {"request": request, "result": result},
-    )
 
 
 @router.get("/imports", response_class=HTMLResponse)
@@ -130,9 +186,7 @@ def imports_detail(request: Request, import_id: str, db: Session = Depends(get_d
     if not imp:
         raise HTTPException(status_code=404, detail="import not found")
 
-    counts = dict(
-        db.query(Ride.status, func.count(Ride.id)).filter(Ride.import_id == imp.id).group_by(Ride.status).all()
-    )
+    counts = dict(db.query(Ride.status, func.count(Ride.id)).filter(Ride.import_id == imp.id).group_by(Ride.status).all())
     detail = {
         "id": str(imp.id),
         "source": imp.source,
@@ -145,9 +199,6 @@ def imports_detail(request: Request, import_id: str, db: Session = Depends(get_d
     return templates.TemplateResponse("imports_detail.html", {"request": request, "imp": detail})
 
 
-# -----------------------------
-# Pendências UI
-# -----------------------------
 @router.get("/pendencias", response_class=HTMLResponse)
 def pendencias(
     request: Request,
@@ -233,12 +284,12 @@ def pendencias_assign(
         assign_ride(db, ride_id=ride_id, courier_id=courier_id, pay_in_current_week=pay_in_current_week)
         return templates.TemplateResponse(
             "partials/assignment_row_done.html",
-            {"request": request, "ride_id": ride_id},
+            {"request": request, "ride_id": ride_id, "message": "Atribuído com sucesso."},
         )
     except Exception as e:
         return templates.TemplateResponse(
             "partials/assignment_row_error.html",
-            {"request": request, "ride_id": ride_id, "error": str(e)},
+            {"request": request, "ride_id": ride_id, "error": _friendly_error_message(e)},
         )
 
 
@@ -280,14 +331,10 @@ def pendencias_yooga_resolve(
     keep_ride_id: str | None = Form(default=None),
     db: Session = Depends(get_db),
 ):
-    # action: APPROVE_ALL | KEEP_ONE
     resolve_yooga(db, group_id=group_id, action=action, keep_ride_id=keep_ride_id)
     return _ui_redirect(f"/ui/pendencias?tab=yooga&week_id={week_id}&ok=1")
 
 
-# -----------------------------
-# Weeks UI
-# -----------------------------
 @router.get("/weeks/current", response_class=HTMLResponse)
 def weeks_current(
     request: Request,
@@ -304,7 +351,7 @@ def weeks_current(
     preview = compute_week_payout_preview(db, week_id=week_id)
     rows = []
     pending_total = 0
-    for r in preview["rows"]:
+    for r in preview:
         pending_total += int(r.get("pending_count") or 0)
         rows.append(r)
 
@@ -323,19 +370,124 @@ def weeks_current(
 
 @router.post("/weeks/{week_id}/close")
 def weeks_close_ui(week_id: str, db: Session = Depends(get_db)):
-    close_week(db, week_id=week_id)
-    return _ui_redirect(f"/ui/weeks/current?week_id={week_id}&ok=1")
+    try:
+        close_week(db, week_id=week_id)
+        return _ui_redirect(f"/ui/weeks/current?week_id={week_id}&ok=1&msg={quote('Semana fechada com sucesso')}")
+    except Exception as exc:
+        return _ui_redirect(f"/ui/weeks/current?week_id={week_id}&err={quote(_friendly_error_message(exc))}")
 
 
 @router.post("/weeks/{week_id}/pay")
 def weeks_pay_ui(week_id: str, db: Session = Depends(get_db)):
-    pay_week(db, week_id=week_id)
-    return _ui_redirect(f"/ui/weeks/current?week_id={week_id}&ok=1")
+    try:
+        pay_week(db, week_id=week_id)
+        return _ui_redirect(f"/ui/weeks/current?week_id={week_id}&ok=1&msg={quote('Semana marcada como paga')}")
+    except Exception as exc:
+        return _ui_redirect(f"/ui/weeks/current?week_id={week_id}&err={quote(_friendly_error_message(exc))}")
 
 
-# -----------------------------
-# Couriers UI
-# -----------------------------
+@router.get("/weeks/{week_id}/couriers/{courier_id}", response_class=HTMLResponse)
+def week_courier_audit(
+    request: Request,
+    week_id: str,
+    courier_id: str,
+    date_from: str | None = Query(default=None),
+    date_to: str | None = Query(default=None),
+    db: Session = Depends(get_db),
+):
+    week = get_week_or_404(db, week_id)
+    courier = db.query(Courier).filter(Courier.id == courier_id).first()
+    if not courier:
+        raise HTTPException(status_code=404, detail="courier not found")
+
+    preview_rows = compute_week_payout_preview(db, week_id)
+    row = next((r for r in preview_rows if str(r.get("courier_id")) == courier_id), None)
+    preview = {
+        "rides_amount": float((row or {}).get("rides_amount") or 0),
+        "extras_amount": float((row or {}).get("extras_amount") or 0),
+        "vales_amount": float((row or {}).get("vales_amount") or 0),
+        "installments_applied_amount": float((row or {}).get("installments_amount") or 0),
+        "net_amount": float((row or {}).get("net_amount") or 0),
+    }
+
+    ride_sql = """
+        SELECT
+            r.id,
+            r.order_dt,
+            r.source,
+            r.value_raw,
+            r.fee_type,
+            r.status,
+            r.week_id
+        FROM rides r
+        WHERE r.courier_id = :courier_id
+          AND ((r.week_id = :week_id AND r.paid_in_week_id IS NULL) OR r.paid_in_week_id = :week_id)
+    """
+    params: dict[str, Any] = {"courier_id": courier_id, "week_id": week_id}
+    if date_from:
+        ride_sql += " AND r.order_date >= :date_from"
+        params["date_from"] = date_from
+    if date_to:
+        ride_sql += " AND r.order_date <= :date_to"
+        params["date_to"] = date_to
+    ride_sql += " ORDER BY r.order_dt ASC"
+    rides = [dict(x) for x in db.execute(sa_text(ride_sql), params).mappings().all()]
+
+    ledger_sql = """
+        SELECT le.effective_date, le.type, le.amount, le.note
+        FROM ledger_entries le
+        WHERE le.week_id = :week_id
+          AND le.courier_id = :courier_id
+    """
+    if date_from:
+        ledger_sql += " AND le.effective_date >= :date_from"
+    if date_to:
+        ledger_sql += " AND le.effective_date <= :date_to"
+    ledger_sql += " ORDER BY le.effective_date ASC, le.created_at ASC"
+    ledger_entries = [dict(x) for x in db.execute(sa_text(ledger_sql), params).mappings().all()]
+
+    installments_due = [
+        {
+            **dict(i),
+            "remaining_amount": max(0.0, float(i["amount"] or 0) - float(i["paid_amount"] or 0)),
+        }
+        for i in db.execute(
+            sa_text(
+                """
+                SELECT li.installment_no, li.due_closing_seq, li.status, li.amount, li.paid_amount
+                FROM loan_installments li
+                JOIN loan_plans lp ON lp.id = li.plan_id
+                WHERE lp.courier_id = :courier_id
+                  AND lp.status = 'ACTIVE'
+                  AND li.status IN ('DUE','ROLLED','PARTIAL')
+                  AND li.due_closing_seq <= :closing_seq
+                ORDER BY li.due_closing_seq ASC, li.installment_no ASC
+                """
+            ),
+            {"courier_id": courier_id, "closing_seq": int(week.closing_seq)},
+        )
+        .mappings()
+        .all()
+    ]
+
+    return templates.TemplateResponse(
+        "week_courier_audit.html",
+        {
+            "request": request,
+            "week": week,
+            "week_id": week_id,
+            "courier_id": courier_id,
+            "courier_nome": courier.nome_resumido,
+            "preview": preview,
+            "date_from": date_from,
+            "date_to": date_to,
+            "rides": rides,
+            "ledger_entries": ledger_entries,
+            "installments_due": installments_due,
+        },
+    )
+
+
 @router.get("/couriers", response_class=HTMLResponse)
 def couriers_list_ui(
     request: Request,
@@ -408,7 +560,7 @@ def couriers_quick_create_ui(
     couriers = list_couriers(db, active=True, categoria=None, q=None)
     courier_opts = [{"id": str(c.id), "nome": c.nome_resumido, "categoria": c.categoria} for c in couriers]
     return templates.TemplateResponse(
-        "partials/courier_options.html",
+        "partials/courier_options_fragment_oob.html",
         {"request": request, "courier_opts": courier_opts},
     )
 

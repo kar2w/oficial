@@ -1,6 +1,6 @@
 <div class="card card--inner">
   <div class="actions">
-    <form hx-post="/ui/pendencias/yooga/{{ group_id }}/resolve">
+    <form hx-post="/ui/pendencias/yooga/{{ group_id }}/resolve" data-confirm="Aprovar todos os itens deste grupo? (os sem motoboy vão virar pendência de atribuição)">
       <input type="hidden" name="week_id" value="{{ week_id }}"/>
       <input type="hidden" name="action" value="APPROVE_ALL"/>
       <button class="btn btn--small" type="submit">Aprovar todos</button>
@@ -28,7 +28,7 @@
           <td class="num mono">{{ '%.2f'|format(it.value_raw) }}</td>
           <td class="mono">{{ it.fee_type }}</td>
           <td>
-            <form hx-post="/ui/pendencias/yooga/{{ group_id }}/resolve">
+            <form hx-post="/ui/pendencias/yooga/{{ group_id }}/resolve" data-confirm="Manter apenas ESTE item e descartar os outros do grupo?">
               <input type="hidden" name="week_id" value="{{ week_id }}"/>
               <input type="hidden" name="action" value="KEEP_ONE"/>
               <input type="hidden" name="keep_ride_id" value="{{ it.id }}"/>
@@ -44,10 +44,10 @@
             <td class="mono">{{ it.order_dt }}</td>
             <td class="mono">{{ it.delivery_dt or "-" }}</td>
             <td class="mono">{{ it.courier_name_raw }}</td>
-            <td class="mono">{{ '%.2f'|format(it.value_raw) }}</td>
+            <td class="num mono">{{ '%.2f'|format(it.value_raw) }}</td>
             <td class="mono">{{ it.fee_type }}</td>
             <td>
-              <form hx-post="/ui/pendencias/yooga/{{ yooga_first_group_id }}/resolve">
+              <form hx-post="/ui/pendencias/yooga/{{ yooga_first_group_id }}/resolve" data-confirm="Manter apenas ESTE item e descartar os outros do grupo?">
                 <input type="hidden" name="week_id" value="{{ week_id }}"/>
                 <input type="hidden" name="action" value="KEEP_ONE"/>
                 <input type="hidden" name="keep_ride_id" value="{{ it.id }}"/>

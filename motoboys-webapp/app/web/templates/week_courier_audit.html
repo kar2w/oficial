@@ -1,0 +1,133 @@
+{% extends "base.html" %}
+{% set nav="weeks" %}
+{% set title="Auditoria" %}
+{% block content %}
+  <header class="pagehead">
+    <div>
+      <h1>Auditoria</h1>
+      <p class="muted">Semana {{ week.start_date }} → {{ week.end_date }} · {{ courier_nome }}</p>
+    </div>
+    <div class="actions">
+      <a class="btn btn--ghost" href="/ui/weeks/current?week_id={{ week_id }}">Voltar</a>
+      <a class="btn btn--ghost" href="/ui/pendencias?week_id={{ week_id }}">Pendências</a>
+    </div>
+  </header>
+
+  <section class="card">
+    <div class="actions" style="flex-wrap:wrap">
+      <div class="pill"><span class="muted">Taxas</span><strong class="mono">{{ '%.2f'|format(preview.rides_amount) }}</strong></div>
+      <div class="pill"><span class="muted">Extras</span><strong class="mono">{{ '%.2f'|format(preview.extras_amount) }}</strong></div>
+      <div class="pill"><span class="muted">Vales</span><strong class="mono">{{ '%.2f'|format(preview.vales_amount) }}</strong></div>
+      <div class="pill"><span class="muted">Parcelas (aplicadas)</span><strong class="mono">{{ '%.2f'|format(preview.installments_applied_amount) }}</strong></div>
+      <div class="pill"><span class="muted">Líquido</span><strong class="mono">{{ '%.2f'|format(preview.net_amount) }}</strong></div>
+    </div>
+
+    <form method="get" action="/ui/weeks/{{ week_id }}/couriers/{{ courier_id }}" class="form form--row" style="margin-top:12px">
+      <label class="field field--inline">
+        <span>Data (de)</span>
+        <input type="date" name="date_from" value="{{ date_from or '' }}" />
+      </label>
+      <label class="field field--inline">
+        <span>Data (até)</span>
+        <input type="date" name="date_to" value="{{ date_to or '' }}" />
+      </label>
+      <button class="btn btn--ghost" type="submit">Filtrar</button>
+      {% if date_from or date_to %}
+        <a class="btn btn--ghost" href="/ui/weeks/{{ week_id }}/couriers/{{ courier_id }}">Limpar</a>
+      {% endif %}
+    </form>
+  </section>
+
+  <section class="card">
+    <h2>Rides (pagos na semana)</h2>
+    <table class="table">
+      <thead>
+        <tr>
+          <th>Data/Hora</th>
+          <th>Fonte</th>
+          <th class="num">Valor bruto</th>
+          <th class="num">Taxa (6/10)</th>
+          <th>Status</th>
+          <th>Semana original</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for r in rides %}
+          <tr>
+            <td class="mono">{{ r.order_dt }}</td>
+            <td class="mono">{{ r.source }}</td>
+            <td class="num mono">{{ '%.2f'|format(r.value_raw) }}</td>
+            <td class="num mono">{{ r.fee_type }}</td>
+            <td class="mono">{{ r.status }}</td>
+            <td class="mono">{{ r.week_id }}</td>
+          </tr>
+        {% endfor %}
+        {% if not rides %}
+          <tr><td colspan="6" class="muted">Sem rides no escopo.</td></tr>
+        {% endif %}
+      </tbody>
+    </table>
+  </section>
+
+  <section class="card">
+    <h2>Ledger (extras/vales)</h2>
+    <table class="table">
+      <thead>
+        <tr>
+          <th>Data</th>
+          <th>Tipo</th>
+          <th class="num">Valor</th>
+          <th>Obs</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for l in ledger_entries %}
+          <tr>
+            <td class="mono">{{ l.effective_date }}</td>
+            <td class="mono">{{ l.type }}</td>
+            <td class="num mono">{{ '%.2f'|format(l.amount) }}</td>
+            <td class="mono">{{ l.note or '' }}</td>
+          </tr>
+        {% endfor %}
+        {% if not ledger_entries %}
+          <tr><td colspan="4" class="muted">Sem lançamentos no ledger.</td></tr>
+        {% endif %}
+      </tbody>
+    </table>
+  </section>
+
+  <section class="card">
+    <h2>Empréstimos (parcelas vencidas)</h2>
+    <table class="table">
+      <thead>
+        <tr>
+          <th>#</th>
+          <th>Due closing seq</th>
+          <th>Status</th>
+          <th class="num">Parcela</th>
+          <th class="num">Pago</th>
+          <th class="num">Restante</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for i in installments_due %}
+          <tr>
+            <td class="mono">{{ i.installment_no }}</td>
+            <td class="mono">{{ i.due_closing_seq }}</td>
+            <td class="mono">{{ i.status }}</td>
+            <td class="num mono">{{ '%.2f'|format(i.amount) }}</td>
+            <td class="num mono">{{ '%.2f'|format(i.paid_amount) }}</td>
+            <td class="num mono">{{ '%.2f'|format(i.remaining_amount) }}</td>
+          </tr>
+        {% endfor %}
+        {% if not installments_due %}
+          <tr><td colspan="6" class="muted">Sem parcelas vencidas até este fechamento.</td></tr>
+        {% endif %}
+      </tbody>
+    </table>
+
+    <div class="muted" style="margin-top:10px">
+      Obs: o desconto de parcelas aplicado na semana é limitado ao saldo disponível (taxas + extras − vales).
+    </div>
+  </section>
+{% endblock %}

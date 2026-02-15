@@ -8,11 +8,21 @@
   <script src="https://unpkg.com/htmx.org@1.9.12"></script>
 </head>
 <body>
+  <div id="global-loading" class="loading-overlay hidden" aria-hidden="true">
+    <div class="loading-card">
+      <div class="spinner" aria-hidden="true"></div>
+      <div>
+        <div style="font-weight:600">Processando…</div>
+        <div class="muted" style="margin-top:4px">Pode levar alguns segundos.</div>
+      </div>
+    </div>
+  </div>
+
   <div class="layout">
     <aside class="sidebar">
       <div class="brand">
         <div class="brand__title">motoboys-webapp</div>
-        <div class="brand__sub">UI mínima (P0)</div>
+        <div class="brand__sub">UI mínima (P0/P1)</div>
       </div>
 
       <nav class="nav">
@@ -29,10 +39,14 @@
 
     <main class="main">
       {% if request.query_params.get('ok') %}
-        <div class="flash flash--ok">OK</div>
+        <div class="flash flash--ok">
+          {{ request.query_params.get('msg') or 'OK' }}
+        </div>
       {% endif %}
       {% if request.query_params.get('err') %}
-        <div class="flash flash--err">{{ request.query_params.get('err') }}</div>
+        <div class="flash flash--err">
+          {{ request.query_params.get('err') }}
+        </div>
       {% endif %}
 
       {% block content %}{% endblock %}
@@ -40,12 +54,82 @@
   </div>
 
   <script>
-    // Quando criar entregador rápido, atualizar dropdowns de entregador (pendências).
-    document.body.addEventListener('couriers-updated', () => {
+    // ---------
+    // Confirm dialogs (close/pay/etc.)
+    // ---------
+    document.addEventListener('submit', (ev) => {
+      const form = ev.target;
+      if (!(form instanceof HTMLFormElement)) return;
+
+      const msg = form.getAttribute('data-confirm');
+      if (msg) {
+        const ok = window.confirm(msg);
+        if (!ok) {
+          ev.preventDefault();
+          ev.stopPropagation();
+          return;
+        }
+      }
+
+      const loading = form.getAttribute('data-loading');
+      if (loading === 'global') {
+        const el = document.getElementById('global-loading');
+        if (el) {
+          el.classList.remove('hidden');
+          el.setAttribute('aria-hidden', 'false');
+        }
+      }
+    }, true);
+
+    // ---------
+    // HTMX loading indicator (global overlay for specific requests)
+    // ---------
+    document.body.addEventListener('htmx:beforeRequest', (ev) => {
+      const elt = ev.detail.elt;
+      if (!elt) return;
+
+      const loading = elt.getAttribute && elt.getAttribute('data-loading');
+      if (loading === 'global') {
+        const el = document.getElementById('global-loading');
+        if (el) {
+          el.classList.remove('hidden');
+          el.setAttribute('aria-hidden', 'false');
+        }
+      }
+    });
+
+    document.body.addEventListener('htmx:afterRequest', () => {
+      const el = document.getElementById('global-loading');
+      if (el) {
+        el.classList.add('hidden');
+        el.setAttribute('aria-hidden', 'true');
+      }
+    });
+
+    // ---------
+    // After creating courier quickly, update all courier selects
+    // We swap a hidden "courier-options-fragment" out-of-band.
+    // ---------
+    function syncCourierSelects() {
+      const frag = document.getElementById('courier-options-fragment');
+      if (!frag) return;
+
+      const optsHtml = frag.innerHTML;
       document.querySelectorAll('select[data-courier-select]').forEach(sel => {
-        // htmx atualiza apenas o bloco alvo (#courier-options); aqui só força re-render do select
-        // (mantém simples; o target já contém as <option> atualizadas).
+        const previous = sel.value;
+        sel.innerHTML = optsHtml;
+        // Try to restore selection.
+        if (previous) {
+          sel.value = previous;
+        }
       });
+    }
+
+    document.body.addEventListener('htmx:afterSwap', (ev) => {
+      const target = ev.detail && ev.detail.target;
+      if (target && target.id === 'courier-options-fragment') {
+        syncCourierSelects();
+      }
     });
   </script>
 </body>
