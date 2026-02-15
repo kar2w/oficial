@@ -32,6 +32,24 @@ templates = Jinja2Templates(directory=str(BASE_DIR / "templates"))
 
 router_public = APIRouter(prefix="/ui", include_in_schema=False)
 
+
+def _safe_internal_next(next_value: str | None) -> str | None:
+    if not next_value:
+        return None
+
+    nxt = next_value.strip()
+    if not nxt:
+        return None
+
+    parsed = urllib.parse.urlsplit(nxt)
+    if parsed.scheme or parsed.netloc:
+        return None
+
+    if not nxt.startswith("/ui/"):
+        return None
+
+    return nxt
+
 def _next_url(request: Request, fallback: str = "/ui/imports/new") -> str:
     qp = request.url.query
     path = request.url.path
@@ -179,13 +197,15 @@ def login_page(request: Request, next: str | None = Query(default=None)):
     if request.session.get("user"):
         role = request.session.get("role")
         default_home = "/ui/weeks/current" if role == "CASHIER" else "/ui/imports/new"
-        return _ui_redirect(next or default_home)
+        return _ui_redirect(_safe_internal_next(next) or default_home)
+
+    safe_next = _safe_internal_next(next) or "/ui/imports/new"
 
     return templates.TemplateResponse(
         "login.html",
         {
             "request": request,
-            "next": next or "/ui/imports/new",
+            "next": safe_next,
             "error": None,
             "desktop_mode": settings.DESKTOP_MODE,
         },
@@ -211,6 +231,8 @@ def login_post(
     ip_key = f"ip:{ip}"
     user_key = f"user:{u.lower()}" if u else "user:"
 
+    safe_next = _safe_internal_next(next)
+
     if _rl_is_limited(ip_key, now) or _rl_is_limited(user_key, now):
         # approximate retry-after (seconds until the oldest attempt exits the window)
         arr = _login_attempts.get(ip_key) or _login_attempts.get(user_key) or []
@@ -219,7 +241,7 @@ def login_post(
             "login.html",
             {
                 "request": request,
-                "next": next or "/ui/imports/new",
+                "next": safe_next or "/ui/imports/new",
                 "error": f"Muitas tentativas. Aguarde ~{retry_after}s e tente novamente.",
                 "desktop_mode": settings.DESKTOP_MODE,
             },
@@ -239,7 +261,7 @@ def login_post(
 
         # Safety: cashier can't be redirected to admin-only pages
         default_home = "/ui/weeks/current" if role == "CASHIER" else "/ui/imports/new"
-        nxt = (next or default_home).strip() or default_home
+        nxt = safe_next or default_home
         if role == "CASHIER" and not (nxt.startswith("/ui/weeks") or nxt.startswith("/ui/login")):
             nxt = default_home
 
@@ -254,7 +276,7 @@ def login_post(
         "login.html",
         {
             "request": request,
-            "next": next or "/ui/imports/new",
+            "next": safe_next or "/ui/imports/new",
             "error": "Credenciais inválidas.",
             "desktop_mode": settings.DESKTOP_MODE,
         },
