@@ -12,5 +12,27 @@ services:
       - motoboys_pgdata:/var/lib/postgresql/data
       - ./db/schema.sql:/docker-entrypoint-initdb.d/00-schema.sql:ro
 
+  web:
+    build:
+      context: ./motoboys-webapp
+      dockerfile: Dockerfile
+    container_name: motoboys-web
+    environment:
+      # Dentro do compose, o host do Postgres é o nome do serviço: db
+      DATABASE_URL: postgresql+psycopg://postgres:postgres@db:5432/motoboys
+      TZ: America/Fortaleza
+      CORS_ORIGINS: "*"
+      # Seed local (arquivo incluído no repo)
+      WEEKLY_COURIERS_JSON_PATH: /app/data/entregadores_semanais.json
+    depends_on:
+      - db
+    ports:
+      - "8000:8000"
+    # Para desenvolvimento/piloto, manter hot-reload (pode remover o volume em produção)
+    volumes:
+      - ./motoboys-webapp:/app
+    command: >
+      uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+
 volumes:
   motoboys_pgdata:
