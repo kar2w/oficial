@@ -1,6 +1,6 @@
 # Motoboys WebApp (MVP)
 
-Backend FastAPI + Postgres (Docker).
+Backend FastAPI com suporte a modo server (Postgres) e modo desktop (SQLite local por padrão).
 
 > Fonte única de verdade do schema SQL: `../db/schema.sql` (arquivo na raiz do repositório).
 
@@ -13,8 +13,49 @@ MVP cobre:
 - Regra fixa: `valor_raw == 10.00 -> fee_type=10`, senão `fee_type=6`
 
 ## Requisitos
-- Docker + Docker Compose
 - Python 3.11+
+- Docker + Docker Compose (apenas para modo `server`)
+
+## Modos da aplicação (`APP_MODE`)
+- `server` (padrão): usa `DATABASE_URL` (tipicamente `postgresql+psycopg://...`) e fluxo com Docker/Postgres.
+- `desktop`: permite execução local sem Docker.
+  - **Estratégia adotada (opção A): SQLite local** via `sqlite+pysqlite:///...`.
+  - Fallback automático quando `DATABASE_URL` não for definido: arquivo `motoboys.db` no diretório de dados do usuário.
+    - Windows: `%APPDATA%/Motoboys/motoboys.db`
+    - Linux/macOS: `~/.local/share/Motoboys/motoboys.db`
+  - Opcional: sobrescreva o diretório com `APP_DATA_DIR=/caminho/para/dados`.
+
+### Opções de banco para desktop
+- **Opção A (implementada): SQLite local**, simples para empacotar e rodar offline.
+- **Opção B (alternativa): Postgres embarcado no instalador**, mantém máxima paridade com produção, porém aumenta complexidade de instalação/distribuição.
+
+
+## Rodar em modo desktop (sem Docker)
+```bash
+cd motoboys-webapp
+cp .env.example .env
+python -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+
+# habilita modo desktop
+echo "APP_MODE=desktop" >> .env
+
+uvicorn --app-dir . app.main:app --reload --host 0.0.0.0 --port 8000
+```
+
+### Desktop no Windows PowerShell
+```powershell
+cd motoboys-webapp
+copy .env.example .env
+python -m venv .venv
+.\.venv\Scripts\Activate.ps1
+pip install -r .\requirements.txt
+
+Add-Content .env "APP_MODE=desktop"
+
+uvicorn --app-dir . app.main:app --reload --host 0.0.0.0 --port 8000
+```
 
 ## Rodar (Linux/Codespaces) a partir da raiz do repositório (`/workspace/oficial`)
 ```bash

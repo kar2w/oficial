@@ -5,7 +5,16 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from app.settings import settings
 
-engine = create_engine(settings.DATABASE_URL, pool_pre_ping=True)
+def _engine_kwargs() -> dict:
+    if settings.APP_MODE == "desktop" and settings.DATABASE_URL.lower().startswith("sqlite"):
+        return {
+            "connect_args": {"check_same_thread": False},
+            "pool_pre_ping": False,
+        }
+    return {"pool_pre_ping": True}
+
+
+engine = create_engine(settings.DATABASE_URL, **_engine_kwargs())
 SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False)
 
 
