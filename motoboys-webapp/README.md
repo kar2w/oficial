@@ -30,6 +30,21 @@ MVP cobre:
 - **Opção B (alternativa): Postgres embarcado no instalador**, mantém máxima paridade com produção, porém aumenta complexidade de instalação/distribuição.
 
 
+### CORS_ORIGINS (credenciais/cookies)
+- O backend usa `allow_credentials=True` **somente** quando `CORS_ORIGINS` estiver configurado com uma lista explícita de origens confiáveis.
+- Se `CORS_ORIGINS` estiver vazio/não definido, o app inicia com CORS sem credenciais (`allow_credentials=False`).
+- Não use `*` quando precisar de autenticação por cookie/header com credenciais.
+
+Exemplos:
+```env
+# Desenvolvimento (frontend local)
+CORS_ORIGINS=http://localhost:3000,http://127.0.0.1:3000
+
+# Produção (somente domínios confiáveis)
+CORS_ORIGINS=https://app.seudominio.com,https://admin.seudominio.com
+```
+
+
 ## Rodar em modo desktop (sem Docker)
 ```bash
 cd motoboys-webapp

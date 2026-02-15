@@ -20,7 +20,7 @@ def _load_dotenvs() -> None:
 
 def _parse_cors_origins(raw: str | None) -> list[str]:
     if not raw or not raw.strip():
-        return ["*"]
+        return []
     return [x.strip() for x in raw.split(",") if x.strip()]
 
 
