@@ -1,0 +1,158 @@
+{% extends "base.html" %}
+{% set nav="pendencias" %}
+{% set title="Pendências" %}
+{% block content %}
+  <header class="pagehead">
+    <h1>Pendências</h1>
+    <p class="muted">Zere as pendências da semana pela UI (atribuição e revisão Yooga).</p>
+  </header>
+
+  <section class="card">
+    <form method="get" action="/ui/pendencias" class="form form--row">
+      <input type="hidden" name="tab" value="{{ tab }}"/>
+      <label class="field field--inline">
+        <span>Semana</span>
+        <select name="week_id" onchange="this.form.submit()">
+          {% for w in weeks %}
+            <option value="{{ w.id }}" {% if w.id == week_id %}selected{% endif %}>
+              {{ w.start_date }} → {{ w.end_date }} ({{ w.status }})
+            </option>
+          {% endfor %}
+        </select>
+      </label>
+
+      <label class="field field--inline">
+        <span>Fonte</span>
+        <select name="source" onchange="this.form.submit()">
+          <option value="" {% if not source %}selected{% endif %}>(todas)</option>
+          <option value="SAIPOS" {% if source=="SAIPOS" %}selected{% endif %}>SAIPOS</option>
+          <option value="YOOGA" {% if source=="YOOGA" %}selected{% endif %}>YOOGA</option>
+        </select>
+      </label>
+    </form>
+
+    <div class="tabs">
+      <a class="tab {% if tab!='yooga' %}is-active{% endif %}" href="/ui/pendencias?tab=atribuicao&week_id={{ week_id }}{% if source %}&source={{ source }}{% endif %}">Atribuição</a>
+      <a class="tab {% if tab=='yooga' %}is-active{% endif %}" href="/ui/pendencias?tab=yooga&week_id={{ week_id }}{% if source %}&source={{ source }}{% endif %}">Revisão Yooga</a>
+    </div>
+  </section>
+
+  {% if tab != 'yooga' %}
+    <section class="card">
+      <div class="actions">
+        <button class="btn btn--ghost" type="button" onclick="document.getElementById('dlgCourier').showModal()">Criar entregador rápido</button>
+      </div>
+
+      <dialog id="dlgCourier" class="dialog">
+        <form
+          class="form"
+          hx-post="/ui/couriers/quick-create"
+          hx-target="#courier-options"
+          hx-swap="innerHTML"
+          hx-on::after-request="document.getElementById('dlgCourier').close(); document.body.dispatchEvent(new Event('couriers-updated'))"
+        >
+          <h3>Novo entregador</h3>
+          <label class="field">
+            <span>Nome resumido</span>
+            <input name="nome_resumido" required />
+          </label>
+          <label class="field">
+            <span>Nome completo (opcional)</span>
+            <input name="nome_completo" />
+          </label>
+          <label class="field">
+            <span>Categoria</span>
+            <select name="categoria">
+              <option value="SEMANAL">SEMANAL</option>
+              <option value="DIARISTA">DIARISTA</option>
+            </select>
+          </label>
+
+          <div class="actions">
+            <button class="btn" type="submit">Criar</button>
+            <button class="btn btn--ghost" type="button" onclick="document.getElementById('dlgCourier').close()">Cancelar</button>
+          </div>
+        </form>
+      </dialog>
+
+      <h2>Atribuição (PENDENTE_ATRIBUICAO)</h2>
+      <table class="table">
+        <thead>
+          <tr>
+            <th>Data</th>
+            <th>Fonte</th>
+            <th>Nome bruto</th>
+            <th>Valor</th>
+            <th>Taxa</th>
+            <th>Motoboy</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for it in assignment_items %}
+            <tr id="ride-{{ it.id }}">
+              <td class="mono">{{ it.order_dt }}</td>
+              <td>{{ it.source }}</td>
+              <td class="mono">{{ it.courier_name_raw }}</td>
+              <td class="mono">{{ '%.2f'|format(it.value_raw) }}</td>
+              <td class="mono">{{ it.fee_type }}</td>
+              <td>
+                <form
+                  class="form form--row"
+                  hx-post="/ui/pendencias/assign"
+                  hx-target="#ride-{{ it.id }}"
+                  hx-swap="outerHTML"
+                >
+                  <input type="hidden" name="ride_id" value="{{ it.id }}"/>
+                  <input type="hidden" name="pay_in_current_week" value="true"/>
+                  <select name="courier_id" required data-courier-select>
+                    {% include "partials/courier_options.html" %}
+                  </select>
+                  <button class="btn btn--small" type="submit">Atribuir</button>
+                </form>
+              </td>
+              <td class="muted mono">{{ it.pending_reason or "" }}</td>
+            </tr>
+          {% endfor %}
+          {% if not assignment_items %}
+            <tr><td colspan="7" class="muted">Sem pendências de atribuição nessa semana.</td></tr>
+          {% endif %}
+        </tbody>
+      </table>
+    </section>
+  {% else %}
+    <section class="card">
+      <h2>Revisão Yooga (PENDENTE_REVISAO)</h2>
+      <div class="grid2">
+        <div>
+          <h3>Grupos</h3>
+          <div class="listbox">
+            {% for g in yooga_groups %}
+              <button
+                class="listbox__item"
+                hx-get="/ui/pendencias/yooga/{{ g.group_id }}?week_id={{ week_id }}"
+                hx-target="#yooga-detail"
+                hx-swap="innerHTML"
+              >
+                <div class="mono">{{ g.signature_key }}</div>
+                <div class="muted">itens: {{ g.items }}</div>
+              </button>
+            {% endfor %}
+            {% if not yooga_groups %}
+              <div class="muted">Sem grupos pendentes.</div>
+            {% endif %}
+          </div>
+        </div>
+        <div>
+          <div id="yooga-detail">
+            {% if yooga_first_group_id %}
+              {% include "partials/yooga_detail.html" with context %}
+            {% else %}
+              <div class="muted">Selecione um grupo.</div>
+            {% endif %}
+          </div>
+        </div>
+      </div>
+    </section>
+  {% endif %}
+{% endblock %}

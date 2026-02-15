@@ -1,0 +1,76 @@
+{% extends "base.html" %}
+{% set nav="imports" %}
+{% set title="Importar" %}
+{% block content %}
+  <header class="pagehead">
+    <h1>Importar</h1>
+    <p class="muted">Envie um arquivo Saipos ou Yooga para importar.</p>
+  </header>
+
+  <section class="card">
+    <form class="form" method="post" action="/ui/imports/new" enctype="multipart/form-data">
+      <div class="form--row">
+        <label class="field">
+          <span>Fonte</span>
+          <select name="source" required>
+            <option value="SAIPOS">SAIPOS</option>
+            <option value="YOOGA">YOOGA</option>
+          </select>
+        </label>
+
+        <label class="field" style="flex:1">
+          <span>Arquivo</span>
+          <input type="file" name="file" required/>
+        </label>
+
+        <button class="btn" type="submit">Importar</button>
+      </div>
+    </form>
+
+    <div class="actions" style="margin-top:12px;">
+      <a class="btn btn--ghost" href="/ui/imports">Ver imports</a>
+      <a class="btn btn--ghost" href="/ui/pendencias">Ver pendências</a>
+      <a class="btn btn--ghost" href="/ui/weeks/current">Ver semana</a>
+    </div>
+  </section>
+
+  {% if result %}
+    <section class="card">
+      <h2>Resultado</h2>
+
+      <div class="card card--inner">
+        <div class="muted">import_id</div>
+        <div class="mono">{{ result.import_id }}</div>
+        <div class="muted" style="margin-top:10px;">arquivo</div>
+        <div class="mono">{{ result.filename }}</div>
+      </div>
+
+      <table class="table">
+        <thead>
+          <tr>
+            <th>Campo</th>
+            <th class="num">Valor</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr><td>Inseridos</td><td class="num mono">{{ result.inserted }}</td></tr>
+          <tr><td>Pendente atribuição</td><td class="num mono">{{ result.pendente_atribuicao }}</td></tr>
+          <tr><td>Pendente revisão</td><td class="num mono">{{ result.pendente_revisao }}</td></tr>
+          <tr><td>Redirecionado semana fechada</td><td class="num mono">{{ result.redirected_closed_week }}</td></tr>
+        </tbody>
+      </table>
+
+      <div class="actions">
+        <a class="btn" href="/ui/imports/{{ result.import_id }}">Detalhes do import</a>
+        <a class="btn btn--ghost" href="/ui/pendencias?ok=1">Ir para Pendências</a>
+        <a class="btn btn--ghost" href="/ui/weeks/current?ok=1">Ir para Semana</a>
+      </div>
+
+      {% if result.week_ids_touched %}
+        <div class="muted" style="margin-top:10px;">
+          Weeks touched: <span class="mono">{{ result.week_ids_touched }}</span>
+        </div>
+      {% endif %}
+    </section>
+  {% endif %}
+{% endblock %}

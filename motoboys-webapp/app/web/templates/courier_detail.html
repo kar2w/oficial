@@ -1,0 +1,95 @@
+{% extends "base.html" %}
+{% set nav="couriers" %}
+{% set title="Entregador" %}
+{% block content %}
+  <header class="pagehead">
+    <div>
+      <h1>Entregador</h1>
+      <p class="muted mono">{{ courier.id }}</p>
+    </div>
+    <div class="actions">
+      <a class="btn btn--ghost" href="/ui/couriers">Voltar</a>
+    </div>
+  </header>
+
+  <section class="card">
+    <h2>Dados</h2>
+    <form method="post" action="/ui/couriers/{{ courier.id }}" class="form">
+      <div class="form--row">
+        <label class="field" style="flex:1">
+          <span>Nome resumido</span>
+          <input name="nome_resumido" value="{{ courier.nome_resumido }}" required />
+        </label>
+
+        <label class="field" style="flex:1">
+          <span>Nome completo</span>
+          <input name="nome_completo" value="{{ courier.nome_completo or '' }}" />
+        </label>
+      </div>
+
+      <div class="form--row">
+        <label class="field">
+          <span>Categoria</span>
+          <select name="categoria">
+            <option value="SEMANAL" {% if courier.categoria == "SEMANAL" %}selected{% endif %}>SEMANAL</option>
+            <option value="DIARISTA" {% if courier.categoria == "DIARISTA" %}selected{% endif %}>DIARISTA</option>
+          </select>
+        </label>
+
+        <label class="field field--inline">
+          <span>Ativo</span>
+          <select name="active">
+            <option value="true" {% if courier.active %}selected{% endif %}>true</option>
+            <option value="false" {% if not courier.active %}selected{% endif %}>false</option>
+          </select>
+        </label>
+
+        <button class="btn" type="submit">Salvar</button>
+      </div>
+    </form>
+  </section>
+
+  <section class="card">
+    <h2>Aliases</h2>
+    <form
+      class="form form--row"
+      hx-post="/ui/couriers/{{ courier.id }}/aliases"
+      hx-target="#alias-list"
+      hx-swap="innerHTML"
+    >
+      <label class="field" style="flex:1">
+        <span>Novo alias</span>
+        <input name="alias_raw" required />
+      </label>
+      <button class="btn" type="submit">Adicionar</button>
+    </form>
+
+    <div id="alias-list" style="margin-top:10px;">
+      {% include "partials/alias_list.html" %}
+    </div>
+  </section>
+
+  <section class="card">
+    <h2>Pagamento</h2>
+    <form method="post" action="/ui/couriers/{{ courier.id }}/payment" class="form form--row">
+      <label class="field">
+        <span>Tipo</span>
+        <select name="key_type">
+          <option value="" {% if not payment.key_type %}selected{% endif %}>(vazio)</option>
+          <option value="PIX" {% if payment.key_type=="PIX" %}selected{% endif %}>PIX</option>
+          <option value="BANK" {% if payment.key_type=="BANK" %}selected{% endif %}>BANK</option>
+          <option value="OTHER" {% if payment.key_type=="OTHER" %}selected{% endif %}>OTHER</option>
+        </select>
+      </label>
+      <label class="field" style="flex:1">
+        <span>Chave / Conta</span>
+        <input name="key_value_raw" value="{{ payment.key_value_raw }}" />
+      </label>
+      <label class="field">
+        <span>Banco</span>
+        <input name="bank" value="{{ payment.bank }}" />
+      </label>
+      <button class="btn" type="submit">Salvar</button>
+    </form>
+  </section>
+{% endblock %}

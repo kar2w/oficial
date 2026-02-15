@@ -1,0 +1,80 @@
+{% extends "base.html" %}
+{% set nav="weeks" %}
+{% set title="Semana" %}
+{% block content %}
+  <header class="pagehead">
+    <h1>Semana</h1>
+    <p class="muted">Resumo → fechar → pagar → exportar.</p>
+  </header>
+
+  <section class="card">
+    <form method="get" action="/ui/weeks/current" class="form form--row">
+      <label class="field field--inline">
+        <span>Semana</span>
+        <select name="week_id" onchange="this.form.submit()">
+          {% for w in weeks %}
+            <option value="{{ w.id }}" {% if w.id == week_id %}selected{% endif %}>
+              {{ w.start_date }} → {{ w.end_date }} ({{ w.status }})
+            </option>
+          {% endfor %}
+        </select>
+      </label>
+
+      <div class="pill">
+        <span class="muted">Status</span>
+        <strong>{{ week.status }}</strong>
+      </div>
+
+      <div class="pill mono">
+        {{ week.start_date }} → {{ week.end_date }}
+      </div>
+    </form>
+
+    {% if pending_total > 0 %}
+      <div class="flash flash--err">Existe(m) {{ pending_total }} pendência(s) aberta(s). Fechamento bloqueado.</div>
+    {% endif %}
+
+    <div class="actions">
+      <form method="post" action="/ui/weeks/{{ week_id }}/close">
+        <button class="btn" type="submit" {% if pending_total > 0 %}disabled title="Resolva as pendências antes"{% endif %}>Fechar semana</button>
+      </form>
+      <form method="post" action="/ui/weeks/{{ week_id }}/pay">
+        <button class="btn btn--ghost" type="submit" {% if week.status != 'CLOSED' %}disabled title="Feche a semana primeiro"{% endif %}>Marcar como paga</button>
+      </form>
+      <a class="btn btn--ghost" href="/weeks/{{ week_id }}/payouts.csv">Exportar pagamentos (CSV)</a>
+    </div>
+  </section>
+
+  <section class="card">
+    <h2>Pagamentos (prévia)</h2>
+    <table class="table">
+      <thead>
+        <tr>
+          <th>Entregador</th>
+          <th class="num">Taxas</th>
+          <th class="num">Extras</th>
+          <th class="num">Vales</th>
+          <th class="num">Parcelas</th>
+          <th class="num">Líquido</th>
+          <th class="num">Pendências</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for r in rows %}
+          <tr class="{% if r.is_flag_red %}row--red{% endif %}">
+            <td>{{ r.courier_nome }}</td>
+            <td class="num mono">{{ '%.2f'|format(r.rides_amount) }}</td>
+            <td class="num mono">{{ '%.2f'|format(r.extras_amount) }}</td>
+            <td class="num mono">{{ '%.2f'|format(r.vales_amount) }}</td>
+            <td class="num mono">{{ '%.2f'|format(r.installments_amount) }}</td>
+            <td class="num mono"><strong>{{ '%.2f'|format(r.net_amount) }}</strong></td>
+            <td class="num mono">{{ r.pending_count }}</td>
+          </tr>
+        {% endfor %}
+        {% if not rows %}
+          <tr><td colspan="7" class="muted">Sem dados para a semana.</td></tr>
+        {% endif %}
+      </tbody>
+    </table>
+  </section>
+{% endblock %}

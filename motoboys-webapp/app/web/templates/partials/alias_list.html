@@ -1,0 +1,24 @@
+<table class="table">
+  <thead>
+    <tr><th>Alias</th><th></th></tr>
+  </thead>
+  <tbody>
+    {% for a in aliases %}
+      <tr>
+        <td class="mono">{{ a.alias_raw }}</td>
+        <td class="num">
+          <form
+            hx-post="/ui/couriers/{{ courier_id }}/aliases/{{ a.id }}/delete"
+            hx-target="#alias-list"
+            hx-swap="innerHTML"
+          >
+            <button class="btn btn--small btn--ghost" type="submit">Remover</button>
+          </form>
+        </td>
+      </tr>
+    {% endfor %}
+    {% if not aliases %}
+      <tr><td colspan="2" class="muted">Sem aliases.</td></tr>
+    {% endif %}
+  </tbody>
+</table>
