@@ -145,3 +145,38 @@ uvicorn --app-dir . app.main:app --reload --host 0.0.0.0 --port 8000
 - GET /pendings/yooga/{group_id}
 - POST /pendings/yooga/{group_id}/resolve
 - POST /seed/weekly-couriers
+
+## Desktop (Windows)
+
+Foi adicionada a pasta `desktop/` com:
+- `launcher.py`: inicia a API local, escolhe porta livre e abre `/ui/login` no navegador.
+- `build.ps1`: gera executável com PyInstaller (onefile/windowed) incluindo templates, static e seed JSON.
+- `requirements-build.txt`: dependências para build desktop.
+
+### Dados do usuário e logs locais
+Por padrão, a execução desktop usa:
+- Dados: `%LOCALAPPDATA%\MotoboysWebApp`
+- Logs: `%LOCALAPPDATA%\MotoboysWebApp\logs\app.log` e `desktop-launcher.log`
+
+Variáveis configuráveis:
+- `USER_DATA_DIR`
+- `LOG_DIR`
+- `WEEKLY_COURIERS_JSON_PATH`
+
+### Build do executável (.exe)
+No PowerShell, a partir de `motoboys-webapp/`:
+
+```powershell
+cd desktop
+./build.ps1 -Version "1.0.0" -AppName "MotoboysWebApp" -CompanyName "Motoboys" -Description "Motoboys WebApp Desktop" -IconPath "desktop/app.ico"
+```
+
+Saída esperada:
+- `dist/MotoboysWebApp.exe`
+
+### Atualização do app desktop
+1. Feche o app aberto.
+2. Substitua o executável antigo pelo novo (`dist/MotoboysWebApp.exe`).
+3. Reabra o app.
+
+A pasta de dados/logs em `%LOCALAPPDATA%\MotoboysWebApp` é preservada entre versões.
