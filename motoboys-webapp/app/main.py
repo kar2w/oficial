@@ -3,6 +3,7 @@ from pathlib import Path
 
 from fastapi import Depends, FastAPI, File, Form, HTTPException, Query, Response, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
+from starlette.middleware.sessions import SessionMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import RedirectResponse
 from sqlalchemy import func, text as sa_text
@@ -38,7 +39,7 @@ from app.services.seed import seed_weekly_couriers
 from app.services.utils import read_upload_bytes, sha256_bytes
 from app.services.week_service import get_current_week, get_open_week_for_date
 from app.settings import settings
-from app.web.router import router as web_router
+from app.web.router import router_private, router_public
 
 app = FastAPI(title="Motoboys WebApp API")
 
@@ -49,8 +50,7 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
-
-
+app.add_middleware(SessionMiddleware, secret_key=settings.SESSION_SECRET)
 
 # -------------------------
 # Web UI (Jinja2 + HTMX)
@@ -60,11 +60,12 @@ STATIC_DIR = BASE_DIR / "web" / "static"
 if STATIC_DIR.exists():
     app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 
-app.include_router(web_router)
+app.include_router(router_public)
+app.include_router(router_private)
 
 @app.get("/", include_in_schema=False)
 def root_redirect():
-    return RedirectResponse(url="/ui/imports/new", status_code=302)
+    return RedirectResponse(url="/ui/login", status_code=302)
 
 
 def _couriers_to_out(db: Session, couriers):
@@ -107,6 +108,12 @@ def _couriers_to_out(db: Session, couriers):
 
 @app.get("/health")
 def health(db: Session = Depends(get_db)):
+    db.execute(sa_text("SELECT 1"))
+    return {"ok": True}
+
+
+@app.get("/healthz")
+def healthz(db: Session = Depends(get_db)):
     db.execute(sa_text("SELECT 1"))
     return {"ok": True}
 

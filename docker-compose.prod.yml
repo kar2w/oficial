@@ -1,0 +1,5 @@
+services:
+  web:
+    environment:
+      APP_ENV: prod
+    volumes: []

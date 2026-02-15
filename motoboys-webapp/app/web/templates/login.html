@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <title>Login · Motoboys</title>
+  <link rel="stylesheet" href="/static/styles.css"/>
+</head>
+<body>
+  <div class="layout" style="align-items:center; justify-content:center;">
+    <main class="main" style="max-width:520px; width:100%;">
+      <div class="card">
+        <h1 style="margin-top:0">Login</h1>
+        <p class="muted" style="margin-top:6px">Acesso restrito (piloto). Use as credenciais do arquivo <span class="mono">.env</span>.</p>
+
+        {% if request.query_params.get('ok') %}
+          <div class="flash flash--ok">{{ request.query_params.get('msg') or 'OK' }}</div>
+        {% endif %}
+
+        {% if error %}
+          <div class="flash flash--err">{{ error }}</div>
+        {% endif %}
+
+        <form class="form" method="post" action="/ui/login">
+          <input type="hidden" name="next" value="{{ next }}"/>
+          <label class="field">
+            <span>Usuário</span>
+            <input name="username" autocomplete="username" required />
+          </label>
+          <label class="field">
+            <span>Senha</span>
+            <input name="password" type="password" autocomplete="current-password" required />
+          </label>
+          <div class="actions">
+            <button class="btn" type="submit">Entrar</button>
+            <a class="btn btn--ghost" href="/docs">Docs</a>
+          </div>
+        </form>
+      </div>
+    </main>
+  </div>
+</body>
+</html>
