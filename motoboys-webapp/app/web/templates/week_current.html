@@ -22,11 +22,16 @@
 
       <div class="pill">
         <span class="muted">Status</span>
-        <strong>{{ week.status }}</strong>
+        <strong class="mono">{{ week.status }}</strong>
       </div>
 
       <div class="pill mono">
         {{ week.start_date }} → {{ week.end_date }}
+      </div>
+
+      <div class="pill">
+        <span class="muted">Pendências</span>
+        <strong class="mono">{{ pending_total }}</strong>
       </div>
     </form>
 
@@ -35,12 +40,20 @@
     {% endif %}
 
     <div class="actions">
-      <form method="post" action="/ui/weeks/{{ week_id }}/close">
-        <button class="btn" type="submit" {% if pending_total > 0 %}disabled title="Resolva as pendências antes"{% endif %}>Fechar semana</button>
+      <form method="post" action="/ui/weeks/{{ week_id }}/close" data-confirm="Fechar a semana {{ week.start_date }} → {{ week.end_date }}? Isso cria o snapshot de pagamentos." data-loading="global">
+        <button class="btn" type="submit"
+          {% if pending_total > 0 or week.status != 'OPEN' %}disabled{% endif %}
+          title="{% if week.status != 'OPEN' %}Semana não está aberta{% elif pending_total>0 %}Resolva as pendências antes{% endif %}">
+          Fechar semana
+        </button>
       </form>
-      <form method="post" action="/ui/weeks/{{ week_id }}/pay">
-        <button class="btn btn--ghost" type="submit" {% if week.status != 'CLOSED' %}disabled title="Feche a semana primeiro"{% endif %}>Marcar como paga</button>
+
+      <form method="post" action="/ui/weeks/{{ week_id }}/pay" data-confirm="Marcar como PAGA? (recomendado só após transferências/Pix feitos)" data-loading="global">
+        <button class="btn btn--ghost" type="submit" {% if week.status != 'CLOSED' %}disabled{% endif %} title="Feche a semana primeiro">
+          Marcar como paga
+        </button>
       </form>
+
       <a class="btn btn--ghost" href="/weeks/{{ week_id }}/payouts.csv">Exportar pagamentos (CSV)</a>
     </div>
   </section>
@@ -57,6 +70,7 @@
           <th class="num">Parcelas</th>
           <th class="num">Líquido</th>
           <th class="num">Pendências</th>
+          <th></th>
         </tr>
       </thead>
       <tbody>
@@ -67,14 +81,31 @@
             <td class="num mono">{{ '%.2f'|format(r.extras_amount) }}</td>
             <td class="num mono">{{ '%.2f'|format(r.vales_amount) }}</td>
             <td class="num mono">{{ '%.2f'|format(r.installments_amount) }}</td>
-            <td class="num mono"><strong>{{ '%.2f'|format(r.net_amount) }}</strong></td>
+            <td class="num mono">
+              {% if r.courier_id %}
+                <a href="/ui/weeks/{{ week_id }}/couriers/{{ r.courier_id }}" class="mono"><strong>{{ '%.2f'|format(r.net_amount) }}</strong></a>
+              {% else %}
+                <strong>{{ '%.2f'|format(r.net_amount) }}</strong>
+              {% endif %}
+            </td>
             <td class="num mono">{{ r.pending_count }}</td>
+            <td>
+              {% if r.courier_id %}
+                <a class="btn btn--small btn--ghost" href="/ui/weeks/{{ week_id }}/couriers/{{ r.courier_id }}">Auditar</a>
+              {% else %}
+                <span class="muted">—</span>
+              {% endif %}
+            </td>
           </tr>
         {% endfor %}
         {% if not rows %}
-          <tr><td colspan="7" class="muted">Sem dados para a semana.</td></tr>
+          <tr><td colspan="8" class="muted">Sem dados para a semana.</td></tr>
         {% endif %}
       </tbody>
     </table>
+
+    <div class="muted" style="margin-top:10px">
+      Clique no <strong>líquido</strong> (ou em <strong>Auditar</strong>) para ver rides + ledger que compõem o valor.
+    </div>
   </section>
 {% endblock %}

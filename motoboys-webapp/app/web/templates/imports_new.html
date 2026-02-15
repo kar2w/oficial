@@ -8,7 +8,7 @@
   </header>
 
   <section class="card">
-    <form class="form" method="post" action="/ui/imports/new" enctype="multipart/form-data">
+    <form class="form" method="post" action="/ui/imports/new" enctype="multipart/form-data" data-loading="global">
       <div class="form--row">
         <label class="field">
           <span>Fonte</span>
@@ -25,6 +25,10 @@
 
         <button class="btn" type="submit">Importar</button>
       </div>
+
+      <div class="muted" style="margin-top:8px">
+        Dicas: se faltar coluna obrigatória, o erro mostra quais colunas estão ausentes.
+      </div>
     </form>
 
     <div class="actions" style="margin-top:12px;">
@@ -34,9 +38,22 @@
     </div>
   </section>
 
+  {% if error %}
+    <section class="card">
+      <div class="flash flash--err">{{ error }}</div>
+    </section>
+  {% endif %}
+
   {% if result %}
     <section class="card">
-      <h2>Resultado</h2>
+      <div class="actions">
+        <h2 style="margin:0">Resultado</h2>
+        {% if result.is_duplicate %}
+          <span class="badge badge--warn">Import duplicado (reusado)</span>
+        {% else %}
+          <span class="badge badge--ok">Import OK</span>
+        {% endif %}
+      </div>
 
       <div class="card card--inner">
         <div class="muted">import_id</div>
@@ -62,13 +79,19 @@
 
       <div class="actions">
         <a class="btn" href="/ui/imports/{{ result.import_id }}">Detalhes do import</a>
-        <a class="btn btn--ghost" href="/ui/pendencias?ok=1">Ir para Pendências</a>
-        <a class="btn btn--ghost" href="/ui/weeks/current?ok=1">Ir para Semana</a>
+        <a class="btn btn--ghost" href="/ui/pendencias?ok=1&msg=Import%20conclu%C3%ADdo">Ir para Pendências</a>
+        <a class="btn btn--ghost" href="/ui/weeks/current?ok=1&msg=Import%20conclu%C3%ADdo">Ir para Semana</a>
       </div>
 
       {% if result.week_ids_touched %}
         <div class="muted" style="margin-top:10px;">
           Weeks touched: <span class="mono">{{ result.week_ids_touched }}</span>
+        </div>
+      {% endif %}
+
+      {% if result.is_duplicate %}
+        <div class="muted" style="margin-top:10px;">
+          Esse arquivo já tinha sido importado (mesmo hash). Estamos usando o import existente.
         </div>
       {% endif %}
     </section>

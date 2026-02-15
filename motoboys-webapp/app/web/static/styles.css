@@ -71,9 +71,7 @@ a:hover { text-decoration: underline; }
 .field--inline { display: flex; gap: 8px; align-items: center; }
 
 .field span { color: var(--muted); font-size: 12px; }
-input, select, button {
-  font: inherit;
-}
+input, select, button { font: inherit; }
 input, select {
   padding: 10px 12px;
   border-radius: 12px;
@@ -187,3 +185,82 @@ hr.sep {
   border-top: 1px solid var(--border);
   margin: 12px 0;
 }
+
+/* -----------------------------
+   P1: Loading + indicators
+------------------------------ */
+.hidden { display: none !important; }
+
+.loading-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,0.55);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 9999;
+}
+
+.loading-card {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  background: var(--panel2);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  padding: 14px 16px;
+  min-width: 320px;
+  box-shadow: 0 12px 40px rgba(0,0,0,0.5);
+}
+
+.spinner {
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  border: 2px solid rgba(255,255,255,0.2);
+  border-top-color: rgba(255,255,255,0.75);
+  animation: spin 0.9s linear infinite;
+}
+
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+.htmx-indicator {
+  display: none;
+}
+.htmx-request .htmx-indicator {
+  display: inline-flex;
+}
+
+.inline-indicator {
+  display: inline-flex;
+  gap: 8px;
+  align-items: center;
+  padding: 6px 10px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: rgba(255,255,255,0.02);
+}
+
+.badge {
+  display: inline-flex;
+  gap: 6px;
+  align-items: center;
+  padding: 4px 8px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  font-size: 12px;
+  color: var(--muted);
+}
+.badge--ok { border-color: rgba(32,201,151,0.35); color: rgba(32,201,151,0.9); }
+.badge--warn { border-color: rgba(255,196,0,0.35); color: rgba(255,196,0,0.9); }
+.badge--err { border-color: rgba(255,107,107,0.35); color: rgba(255,107,107,0.95); }
+
+/* Small utilities used in some templates */
+.list { list-style: none; padding: 0; margin: 10px 0 0; }
+.list li { padding: 8px 0; border-bottom: 1px solid var(--border); }
+.list__row { display: flex; justify-content: space-between; align-items: center; gap: 10px; }
+.inline { display: inline; }
+.row { display: flex; justify-content: space-between; gap: 10px; padding: 6px 0; }
