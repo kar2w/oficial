@@ -4,6 +4,26 @@ Este repositório usa **`motoboys-webapp/app` como diretório canônico da aplic
 
 > UI (HTMX/Jinja) está em **`/ui/*`**.
 
+## Modo desktop (sem Docker)
+
+A API suporta `APP_MODE=desktop` para execução local sem containers.
+
+Estratégia de banco para desktop:
+- **Opção A (implementada):** SQLite em arquivo local (fallback automático em `%APPDATA%/Motoboys` no Windows ou `~/.local/share/Motoboys` no Linux/macOS).
+- **Opção B (alternativa):** Postgres embarcado no instalador (maior paridade com produção, porém mais complexo para distribuir).
+
+Passos rápidos:
+```bash
+cd motoboys-webapp
+cp .env.example .env
+python -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+echo "APP_MODE=desktop" >> .env
+uvicorn --app-dir . app.main:app --reload --host 0.0.0.0 --port 8000
+```
+
+
 ## P2 — Rodar tudo com 1 comando (piloto)
 
 Requisitos: Docker + Docker Compose.
@@ -105,3 +125,6 @@ pg_dump "postgresql://postgres:postgres@localhost:5432/motoboys" -Fc -f backup_$
 # restore (em banco alvo limpo)
 pg_restore --clean --if-exists --no-owner --no-privileges   -d "postgresql://postgres:postgres@localhost:5432/motoboys"   backup_YYYYMMDD_HHMMSS.dump
 ```
+## Desktop build (Windows)
+
+Veja `motoboys-webapp/desktop/` e a seção **Desktop (Windows)** em `motoboys-webapp/README.md` para gerar `MotoboysWebApp.exe` com PyInstaller, incluindo templates/static/assets e metadata de versão.

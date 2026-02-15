@@ -6,3 +6,8 @@ __pycache__/
 .vscode/
 *.log
 .DS_Store
+
+# Desktop build artifacts
+motoboys-webapp/build/
+motoboys-webapp/dist/
+motoboys-webapp/*.spec
