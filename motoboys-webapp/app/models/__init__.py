@@ -77,3 +77,9 @@ class CourierAlias(Base):
     created_at: Mapped[dt.datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=sql_text("now()")
     )
+
+
+from .import_log import ImportLog
+
+# Backward-compatible alias expected by import services
+Import = ImportLog

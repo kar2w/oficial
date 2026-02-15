@@ -6,7 +6,7 @@ from openpyxl import load_workbook
 from sqlalchemy.orm import Session
 from sqlalchemy.exc import IntegrityError
 
-from app.models import Import, Ride
+from app.models import ImportLog, Ride
 from app.services.week_service import get_or_create_week_for_date
 from app.services.courier_match import compute_fee_type, saipos_pending_reason, norm_text, match_courier_id
 
@@ -48,13 +48,13 @@ def _commit_rides_best_effort(db: Session, rides: list[Ride]) -> int:
 
 
 def import_saipos(db: Session, file_bytes: bytes, filename: str, file_hash: str) -> Tuple[str, int, int, int]:
-    imp = Import(source="SAIPOS", filename=filename, file_hash=file_hash, status="DONE", meta={})
+    imp = ImportLog(source="SAIPOS")
     db.add(imp)
     try:
         db.commit()
     except IntegrityError:
         db.rollback()
-        existing = db.query(Import).filter(Import.source == "SAIPOS", Import.file_hash == file_hash).first()
+        existing = db.query(ImportLog).filter(ImportLog.source == "SAIPOS").order_by(ImportLog.id.desc()).first()
         return str(existing.id), 0, 0, 0
     db.refresh(imp)
 

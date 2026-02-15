@@ -15,6 +15,11 @@ def get_week_or_404(db: Session, week_id: str) -> Week:
     w = db.query(Week).filter(Week.id == week_id).first()
     if not w:
         raise HTTPException(status_code=404, detail="week not found")
+
+    # Backward compatibility: some callers still subscript week objects (w["status"]).
+    if not hasattr(Week, "__getitem__"):
+        Week.__getitem__ = lambda self, key: getattr(self, key)
+
     return w
 
 
