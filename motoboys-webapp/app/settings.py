@@ -45,11 +45,16 @@ _session_secret = os.getenv("SESSION_SECRET", _default_secret).strip() or _defau
 _admin_user = os.getenv("ADMIN_USERNAME", "admin").strip() or "admin"
 _admin_pass = os.getenv("ADMIN_PASSWORD", "admin").strip() or "admin"
 
+_cashier_user = os.getenv("CASHIER_USERNAME", "caixa").strip() or "caixa"
+_cashier_pass = os.getenv("CASHIER_PASSWORD", "caixa").strip() or "caixa"
+
 if APP_ENV == "prod":
     if _session_secret == _default_secret:
         raise RuntimeError("SESSION_SECRET default is not allowed in prod. Set SESSION_SECRET in environment.")
     if _admin_pass == "admin":
         raise RuntimeError("ADMIN_PASSWORD default is not allowed in prod. Set ADMIN_PASSWORD in environment.")
+    if _cashier_pass == "caixa":
+        raise RuntimeError("CASHIER_PASSWORD default is not allowed in prod. Set CASHIER_PASSWORD in environment.")
 
 
 @dataclass(frozen=True)
@@ -62,6 +67,8 @@ class Settings:
     SESSION_SECRET: str
     ADMIN_USERNAME: str
     ADMIN_PASSWORD: str
+    CASHIER_USERNAME: str
+    CASHIER_PASSWORD: str
 
 
 settings = Settings(
@@ -73,6 +80,8 @@ settings = Settings(
     SESSION_SECRET=_session_secret,
     ADMIN_USERNAME=_admin_user,
     ADMIN_PASSWORD=_admin_pass,
+    CASHIER_USERNAME=_cashier_user,
+    CASHIER_PASSWORD=_cashier_pass,
 )
 
 DATABASE_URL = settings.DATABASE_URL

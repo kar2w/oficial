@@ -323,6 +323,67 @@ def week_payout_csv(week_id: str, db: Session = Depends(get_db)):
     )
 
 
+
+
+@app.get("/weeks/{week_id}/payouts_pix.csv")
+def week_payout_pix_csv(week_id: str, db: Session = Depends(get_db)):
+    """CSV pronto pra repassar ao caixa: inclui chave PIX/banco e valor líquido."""
+    import csv
+    import io
+
+    w = get_week_or_404(db, week_id)
+    if w.status in ("CLOSED", "PAID"):
+        rows = db.execute(
+            sa_text(
+                """
+                SELECT wp.courier_nome, wp.courier_id::text AS courier_id, wp.net_amount,
+                       cp.key_type, cp.key_value_raw, cp.bank,
+                       :ws AS week_start, :we AS week_end, :st AS week_status
+                  FROM week_payouts wp
+             LEFT JOIN courier_payment cp ON cp.courier_id = wp.courier_id
+                 WHERE wp.week_id = :week_id
+                 ORDER BY wp.courier_nome
+                """
+            ),
+            {"week_id": week_id, "ws": str(w.start_date), "we": str(w.end_date), "st": w.status},
+        ).mappings().all()
+        data_rows = [dict(r) for r in rows]
+    else:
+        preview = compute_week_payout_preview(db, week_id)
+        data_rows = []
+        for r in preview:
+            cid = r.get("courier_id")
+            pay = None
+            if cid:
+                pay = db.query(CourierPayment).filter(CourierPayment.courier_id == cid).first()
+            data_rows.append(
+                {
+                    "courier_nome": r.get("courier_nome"),
+                    "courier_id": str(cid) if cid else "",
+                    "net_amount": r.get("net_amount"),
+                    "key_type": pay.key_type if pay else None,
+                    "key_value_raw": pay.key_value_raw if pay else None,
+                    "bank": pay.bank if pay else None,
+                    "week_start": str(w.start_date),
+                    "week_end": str(w.end_date),
+                    "week_status": w.status,
+                }
+            )
+
+    header = ["courier_nome", "courier_id", "net_amount", "key_type", "key_value_raw", "bank", "week_start", "week_end", "week_status"]
+    buf = io.StringIO()
+    wr = csv.DictWriter(buf, fieldnames=header)
+    wr.writeheader()
+    for row in data_rows:
+        wr.writerow(row)
+
+    filename = f"week_{w.start_date}_to_{w.end_date}_payouts_pix.csv"
+    return Response(
+        content=buf.getvalue(),
+        media_type="text/csv",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
 @app.get("/weeks/{week_id}/ledger", response_model=list[LedgerEntryOut])
 def week_ledger(week_id: str, courier_id: str | None = Query(default=None), db: Session = Depends(get_db)):
     return list_week_ledger(db, week_id=week_id, courier_id=courier_id)

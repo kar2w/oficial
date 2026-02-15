@@ -8,6 +8,7 @@
   <script src="https://unpkg.com/htmx.org@1.9.12"></script>
 </head>
 <body>
+  {% set role = request.session.get('role') %}
   <div id="global-loading" class="loading-overlay hidden" aria-hidden="true">
     <div class="loading-card">
       <div class="spinner" aria-hidden="true"></div>
@@ -26,17 +27,31 @@
       </div>
 
       <nav class="nav">
-        <a class="nav__item {% if nav=='imports' %}is-active{% endif %}" href="/ui/imports/new">Import</a>
-        <a class="nav__item {% if nav=='pendencias' %}is-active{% endif %}" href="/ui/pendencias">Pendências</a>
         <a class="nav__item {% if nav=='weeks' %}is-active{% endif %}" href="/ui/weeks/current">Semana</a>
-        <a class="nav__item {% if nav=='couriers' %}is-active{% endif %}" href="/ui/couriers">Entregadores</a>
+
+        {% if role == 'ADMIN' %}
+          <div class="nav__sep"></div>
+          <a class="nav__item {% if nav=='imports' %}is-active{% endif %}" href="/ui/imports/new">Import</a>
+          <a class="nav__item {% if nav=='pendencias' %}is-active{% endif %}" href="/ui/pendencias">Pendências</a>
+          <a class="nav__item {% if nav=='couriers' %}is-active{% endif %}" href="/ui/couriers">Entregadores</a>
+          <a class="nav__item {% if nav=='audit' %}is-active{% endif %}" href="/ui/audit">Auditoria</a>
+        {% endif %}
       </nav>
 
       <div class="sidebar__footer muted">
         <div class="mono">/ui/*</div>
-        <form method="post" action="/ui/logout" style="margin-top:12px;">
-          <button class="btn btn--ghost" type="submit" style="width:100%;">Sair</button>
-        </form>
+        {% if request.session.get('user') %}
+          <div style="margin-top:8px">Sessão: <strong>{{ request.session.get('user') }}</strong> <span class="pill">{{ role }}</span></div>
+        {% endif %}
+        <div style="margin-top:10px;">
+          {% if request.session.get('user') %}
+            <form method="post" action="/ui/logout" class="inline" data-confirm="Sair do sistema?">
+              <button class="btn btn--small btn--ghost" type="submit">Sair</button>
+            </form>
+          {% else %}
+            <a class="btn btn--small btn--ghost" href="/ui/login">Login</a>
+          {% endif %}
+        </div>
       </div>
     </aside>
 
@@ -57,9 +72,6 @@
   </div>
 
   <script>
-    // ---------
-    // Confirm dialogs (close/pay/etc.)
-    // ---------
     document.addEventListener('submit', (ev) => {
       const form = ev.target;
       if (!(form instanceof HTMLFormElement)) return;
@@ -84,9 +96,6 @@
       }
     }, true);
 
-    // ---------
-    // HTMX loading indicator (global overlay for specific requests)
-    // ---------
     document.body.addEventListener('htmx:beforeRequest', (ev) => {
       const elt = ev.detail.elt;
       if (!elt) return;
@@ -109,10 +118,6 @@
       }
     });
 
-    // ---------
-    // After creating courier quickly, update all courier selects
-    // We swap a hidden "courier-options-fragment" out-of-band.
-    // ---------
     function syncCourierSelects() {
       const frag = document.getElementById('courier-options-fragment');
       if (!frag) return;
@@ -121,7 +126,6 @@
       document.querySelectorAll('select[data-courier-select]').forEach(sel => {
         const previous = sel.value;
         sel.innerHTML = optsHtml;
-        // Try to restore selection.
         if (previous) {
           sel.value = previous;
         }
