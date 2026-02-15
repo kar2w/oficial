@@ -1,0 +1,74 @@
+name: Smoke Check
+
+on:
+  push:
+    branches:
+      - "**"
+  pull_request:
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    env:
+      DATABASE_URL: postgresql+psycopg://postgres:postgres@localhost:5432/motoboys
+      TZ: America/Fortaleza
+      CORS_ORIGINS: "*"
+      SESSION_SECRET: ci-session-secret
+      ADMIN_USERNAME: admin
+      ADMIN_PASSWORD: admin
+      WEEKLY_COURIERS_JSON_PATH: motoboys-webapp/data/entregadores_semanais.json
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: motoboys
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d motoboys"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 20
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r motoboys-webapp/requirements.txt
+
+      - name: Initialize database schema
+        run: |
+          psql "postgresql://postgres:postgres@localhost:5432/motoboys" -f db/schema.sql
+
+      - name: Start API
+        run: |
+          python -m uvicorn --app-dir motoboys-webapp app.main:app --host 0.0.0.0 --port 8000 > smoke-server.log 2>&1 &
+          echo $! > smoke-server.pid
+
+      - name: Run smoke check (DB + /healthz)
+        run: |
+          python motoboys-webapp/scripts/smoke.py --health-url http://127.0.0.1:8000/healthz --health-retries 30 --health-sleep 1
+
+      - name: Stop API
+        if: always()
+        run: |
+          if [ -f smoke-server.pid ]; then
+            kill "$(cat smoke-server.pid)" || true
+          fi
+
+      - name: Upload server log
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: smoke-server-log
+          path: smoke-server.log
