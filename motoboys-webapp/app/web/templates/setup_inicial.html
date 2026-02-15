@@ -1,0 +1,57 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <title>Setup inicial · Motoboys</title>
+  <link rel="stylesheet" href="/static/styles.css"/>
+</head>
+<body>
+  <div class="layout" style="align-items:center; justify-content:center;">
+    <main class="main" style="max-width:720px; width:100%;">
+      <div class="card">
+        <h1 style="margin-top:0">Setup inicial</h1>
+        <p class="muted" style="margin-top:6px">Primeiro acesso em modo desktop: troque as credenciais padrão para continuar.</p>
+
+        {% if error %}
+          <div class="flash flash--err">{{ error }}</div>
+        {% endif %}
+
+        <form class="form" method="post" action="/ui/setup-inicial">
+          <h3>Administrador</h3>
+          <label class="field">
+            <span>Usuário ADMIN</span>
+            <input name="admin_username" autocomplete="username" required />
+          </label>
+          <label class="field">
+            <span>Senha ADMIN</span>
+            <input name="admin_password" type="password" autocomplete="new-password" required />
+          </label>
+          <label class="field">
+            <span>Confirmar senha ADMIN</span>
+            <input name="admin_password_confirm" type="password" autocomplete="new-password" required />
+          </label>
+
+          <h3>Caixa</h3>
+          <label class="field">
+            <span>Usuário CAIXA</span>
+            <input name="cashier_username" autocomplete="username" required />
+          </label>
+          <label class="field">
+            <span>Senha CAIXA</span>
+            <input name="cashier_password" type="password" autocomplete="new-password" required />
+          </label>
+          <label class="field">
+            <span>Confirmar senha CAIXA</span>
+            <input name="cashier_password_confirm" type="password" autocomplete="new-password" required />
+          </label>
+
+          <div class="actions">
+            <button class="btn" type="submit">Concluir setup</button>
+          </div>
+        </form>
+      </div>
+    </main>
+  </div>
+</body>
+</html>

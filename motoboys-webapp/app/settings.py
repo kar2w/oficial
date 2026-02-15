@@ -4,6 +4,8 @@ from pathlib import Path
 
 from dotenv import load_dotenv
 
+from app.core.auth_provider import build_auth_provider
+
 
 APP_DIR_NAME = "MotoboysWebApp"
 
@@ -39,6 +41,11 @@ if APP_MODE not in {"server", "desktop"}:
     raise RuntimeError("Invalid APP_MODE. Use APP_MODE=server or APP_MODE=desktop.")
 
 
+auth_provider = build_auth_provider(app_env=APP_ENV)
+
+_db = os.getenv("DATABASE_URL", "").strip()
+if not _db:
+    raise RuntimeError("Missing DATABASE_URL. Configure DATABASE_URL=postgresql+psycopg://...")
 def _default_user_data_dir() -> Path:
     if os.name == "nt":
         appdata = os.getenv("APPDATA", "").strip()
@@ -83,18 +90,12 @@ _weekly_path = os.getenv("WEEKLY_COURIERS_JSON_PATH", _default_weekly).strip() o
 _default_secret = "dev-secret-change-me"
 _session_secret = os.getenv("SESSION_SECRET", _default_secret).strip() or _default_secret
 
-_admin_user = os.getenv("ADMIN_USERNAME", "admin").strip() or "admin"
-_admin_pass = os.getenv("ADMIN_PASSWORD", "admin").strip() or "admin"
-
-_cashier_user = os.getenv("CASHIER_USERNAME", "caixa").strip() or "caixa"
-_cashier_pass = os.getenv("CASHIER_PASSWORD", "caixa").strip() or "caixa"
-
 if APP_ENV == "prod":
     if _session_secret == _default_secret:
         raise RuntimeError("SESSION_SECRET default is not allowed in prod. Set SESSION_SECRET in environment.")
-    if _admin_pass == "admin":
+    if auth_provider.defaults.admin_password == "admin":
         raise RuntimeError("ADMIN_PASSWORD default is not allowed in prod. Set ADMIN_PASSWORD in environment.")
-    if _cashier_pass == "caixa":
+    if auth_provider.defaults.cashier_password == "caixa":
         raise RuntimeError("CASHIER_PASSWORD default is not allowed in prod. Set CASHIER_PASSWORD in environment.")
 
 
@@ -109,10 +110,7 @@ class Settings:
     LOG_DIR: str
     WEEKLY_COURIERS_JSON_PATH: str
     SESSION_SECRET: str
-    ADMIN_USERNAME: str
-    ADMIN_PASSWORD: str
-    CASHIER_USERNAME: str
-    CASHIER_PASSWORD: str
+    DESKTOP_MODE: bool
 
 
 settings = Settings(
@@ -125,10 +123,7 @@ settings = Settings(
     LOG_DIR=str(_log_dir),
     WEEKLY_COURIERS_JSON_PATH=_weekly_path,
     SESSION_SECRET=_session_secret,
-    ADMIN_USERNAME=_admin_user,
-    ADMIN_PASSWORD=_admin_pass,
-    CASHIER_USERNAME=_cashier_user,
-    CASHIER_PASSWORD=_cashier_pass,
+    DESKTOP_MODE=auth_provider.desktop_mode,
 )
 
 DATABASE_URL = settings.DATABASE_URL
