@@ -38,17 +38,6 @@ APP_ENV = os.getenv("APP_ENV", "dev").strip().lower()
 DB_MODE = os.getenv("DB_MODE", "server").strip().lower()
 if DB_MODE not in {"server", "desktop"}:
     raise RuntimeError("Invalid DB_MODE. Use DB_MODE=server or DB_MODE=desktop")
-
-_db = os.getenv("DATABASE_URL", "").strip()
-if not _db:
-    raise RuntimeError("Missing DATABASE_URL. Configure DATABASE_URL.")
-
-if DB_MODE == "server":
-    if not (_db.lower().startswith("postgresql://") or _db.lower().startswith("postgresql+psycopg://")):
-        raise RuntimeError("Invalid DATABASE_URL for DB_MODE=server. Use postgresql+psycopg://...")
-else:
-    if not _db.lower().startswith("sqlite"):
-        raise RuntimeError("Invalid DATABASE_URL for DB_MODE=desktop. Use sqlite:///...")
 APP_MODE = os.getenv("APP_MODE", "server").strip().lower()
 
 if APP_MODE not in {"server", "desktop"}:
@@ -56,16 +45,6 @@ if APP_MODE not in {"server", "desktop"}:
 
 
 auth_provider = build_auth_provider(app_env=APP_ENV)
-
-_db = os.getenv("DATABASE_URL", "").strip()
-if not _db:
-    raise RuntimeError("Missing DATABASE_URL. Configure DATABASE_URL=postgresql+psycopg://...")
-def _default_user_data_dir() -> Path:
-    if os.name == "nt":
-        appdata = os.getenv("APPDATA", "").strip()
-        if appdata:
-            return Path(appdata) / "Motoboys"
-    return Path.home() / ".local" / "share" / "Motoboys"
 
 
 def _resolve_database_url() -> str:
@@ -82,11 +61,20 @@ def _resolve_database_url() -> str:
     raise RuntimeError("Missing DATABASE_URL. Configure DATABASE_URL (e.g. postgresql+psycopg://...).")
 
 _db = _resolve_database_url()
+_db_lower = _db.lower()
+_is_postgres = _db_lower.startswith(("postgresql://", "postgresql+psycopg://"))
+_is_sqlite = _db_lower.startswith(("sqlite://", "sqlite+pysqlite://"))
 
-if not _db.lower().startswith(("postgresql://", "postgresql+psycopg://", "sqlite://", "sqlite+pysqlite://")):
+if not (_is_postgres or _is_sqlite):
     raise RuntimeError(
         "Invalid DATABASE_URL. Supported schemes: postgresql://, postgresql+psycopg://, sqlite://, sqlite+pysqlite://"
     )
+
+_expected_db_mode = "desktop" if APP_MODE == "desktop" else DB_MODE
+if _expected_db_mode == "server" and not _is_postgres:
+    raise RuntimeError("Invalid DATABASE_URL for server mode. Use postgresql+psycopg://...")
+if _expected_db_mode == "desktop" and not _is_sqlite:
+    raise RuntimeError("Invalid DATABASE_URL for desktop mode. Use sqlite:///...")
 
 _tz = os.getenv("TZ", "America/Fortaleza")
 os.environ.setdefault("TZ", _tz)
