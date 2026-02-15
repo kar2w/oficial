@@ -66,6 +66,18 @@ def _resolve_saipos_cols(headers: list[str]) -> tuple[int, int, int, int, int | 
     )
 
 
+
+
+def _saipos_ride_exists(db: Session, external_id: str | None) -> bool:
+    if not external_id:
+        return False
+    return (
+        db.query(Ride.id)
+        .filter(Ride.source == "SAIPOS", Ride.external_id == external_id)
+        .first()
+        is not None
+    )
+
 def _commit_rides_best_effort(db: Session, rides: list[Ride]) -> int:
     if not rides:
         return 0
@@ -186,10 +198,14 @@ def import_saipos(db: Session, file_bytes: bytes, filename: str, file_hash: str)
             elif v is not None:
                 is_cancelled = bool(v)
 
+        ride_external_id = str(external_id) if external_id is not None else None
+        if _saipos_ride_exists(db, ride_external_id):
+            continue
+
         ride = Ride(
             source="SAIPOS",
             import_id=imp.id,
-            external_id=str(external_id) if external_id is not None else None,
+            external_id=ride_external_id,
             source_row_number=None,
             signature_key=None,
             order_dt=order_dt,

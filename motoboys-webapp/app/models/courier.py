@@ -2,10 +2,10 @@ import datetime as dt
 import uuid
 
 from sqlalchemy import Boolean, DateTime, ForeignKey, Text, text as sql_text
-from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
 from .base import Base, TimestampMixin
+from .dbtypes import GUID
 from .enums import CourierCategory, PaymentKeyType
 
 
@@ -13,7 +13,7 @@ class Courier(Base, TimestampMixin):
     __tablename__ = "couriers"
 
     id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True),
+        GUID(),
         primary_key=True,
         default=uuid.uuid4,
         server_default=sql_text("gen_random_uuid()"),
@@ -28,7 +28,7 @@ class CourierPayment(Base, TimestampMixin):
     __tablename__ = "courier_payment"
 
     courier_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True),
+        GUID(),
         ForeignKey("couriers.id", ondelete="CASCADE"),
         primary_key=True,
     )
@@ -41,13 +41,13 @@ class CourierAlias(Base):
     __tablename__ = "courier_aliases"
 
     id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True),
+        GUID(),
         primary_key=True,
         default=uuid.uuid4,
         server_default=sql_text("gen_random_uuid()"),
     )
     courier_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True),
+        GUID(),
         ForeignKey("couriers.id", ondelete="CASCADE"),
         nullable=False,
     )

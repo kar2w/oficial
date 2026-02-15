@@ -102,6 +102,16 @@ def _resolve_yooga_cols(headers: list[str]) -> tuple[int, int, int, int]:
     return out["Motoboy"], out["Valor Taxa Motoboy"], out["Data do pedido"], out["Data de entrega"]
 
 
+
+
+def _yooga_import_row_exists(db: Session, import_id, row_number: int) -> bool:
+    return (
+        db.query(Ride.id)
+        .filter(Ride.source == "YOOGA", Ride.import_id == import_id, Ride.source_row_number == row_number)
+        .first()
+        is not None
+    )
+
 def import_yooga(db: Session, file_bytes: bytes, filename: str, file_hash: str) -> Tuple[str, int, int, int, int, list[str]]:
     imp = Import(source="YOOGA", filename=filename, file_hash=file_hash, status="DONE", meta={})
     db.add(imp)
@@ -167,6 +177,9 @@ def import_yooga(db: Session, file_bytes: bytes, filename: str, file_hash: str) 
     rides: list[Ride] = []
     review_refs: list[tuple] = []
     for row_number, moto_s, value_raw, order_dt, delivery_dt, signature in rows:
+        if _yooga_import_row_exists(db, imp.id, row_number):
+            continue
+
         fee_type = compute_fee_type(value_raw)
         order_date = order_dt.date()
         week = get_or_create_week_for_date(db, order_date)

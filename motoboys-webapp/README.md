@@ -86,6 +86,17 @@ uvicorn --app-dir . app.main:app --reload --host 0.0.0.0 --port 8000
 - O `docker-compose.yml` monta automaticamente `./db/schema.sql` em `/docker-entrypoint-initdb.d/00-schema.sql`.
 - Esse bootstrap automático roda apenas quando o volume do Postgres é criado do zero.
 - Para reinicializar totalmente: `docker compose down -v && docker compose up -d`.
+
+## Modo de banco (server x desktop)
+- `DB_MODE=server` (padrão): usa Postgres e `db/schema.sql`.
+- `DB_MODE=desktop`: usa SQLite e `db/schema_sqlite.sql`.
+
+Bootstrap por modo:
+```bash
+DB_MODE=server DATABASE_URL=postgresql+psycopg://... ./scripts/bootstrap_db_by_mode.sh
+DB_MODE=desktop DATABASE_URL=sqlite:///./motoboys.db ./scripts/bootstrap_db_by_mode.sh
+```
+
 ## Arquitetura (canônico)
 - Código da aplicação: `motoboys-webapp/app`
 - Entry point da API: `app.main:app` com `--app-dir motoboys-webapp`

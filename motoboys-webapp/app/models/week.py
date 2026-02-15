@@ -2,10 +2,10 @@ import datetime as dt
 import uuid
 
 from sqlalchemy import BigInteger, Boolean, Date, DateTime, ForeignKey, Integer, Numeric, Text, text as sql_text
-from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
 from .base import Base, TimestampMixin
+from .dbtypes import GUID
 from .enums import WeekStatus
 
 
@@ -13,12 +13,12 @@ class Week(Base, TimestampMixin):
     __tablename__ = "weeks"
 
     id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True),
+        GUID(),
         primary_key=True,
         default=uuid.uuid4,
         server_default=sql_text("gen_random_uuid()"),
     )
-    closing_seq: Mapped[int] = mapped_column(BigInteger, nullable=False, server_default=sql_text("nextval('week_closing_seq_seq')"))
+    closing_seq: Mapped[int] = mapped_column(BigInteger, nullable=False)
     start_date: Mapped[dt.date] = mapped_column(Date, nullable=False)
     end_date: Mapped[dt.date] = mapped_column(Date, nullable=False)
     status: Mapped[str] = mapped_column(WeekStatus, nullable=False, server_default=sql_text("'OPEN'"))
@@ -29,10 +29,10 @@ class WeekPayout(Base):
     __tablename__ = "week_payouts"
 
     week_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("weeks.id", ondelete="CASCADE"), primary_key=True
+        GUID(), ForeignKey("weeks.id", ondelete="CASCADE"), primary_key=True
     )
     courier_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("couriers.id", ondelete="CASCADE"), primary_key=True
+        GUID(), ForeignKey("couriers.id", ondelete="CASCADE"), primary_key=True
     )
     rides_amount: Mapped[float] = mapped_column(Numeric(12, 2), nullable=False)
     extras_amount: Mapped[float] = mapped_column(Numeric(12, 2), nullable=False)
