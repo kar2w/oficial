@@ -115,6 +115,8 @@ def create_ledger_entry(
     w = db.query(Week).filter(Week.id == week_id).first()
     if not w:
         raise HTTPException(status_code=404, detail="week not found")
+    if week["status"] != "OPEN":
+        raise HTTPException(status_code=409, detail={"error": "WEEK_NOT_OPEN", "status": week["status"]})
 
     c = db.query(Courier).filter(Courier.id == courier_id).first()
     if not c:
