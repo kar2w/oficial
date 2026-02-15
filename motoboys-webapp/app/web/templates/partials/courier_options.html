@@ -1,0 +1,6 @@
+{% set _opts = courier_opts if courier_opts is defined else [] %}
+<span id="courier-options">
+  {% for c in _opts %}
+    <option value="{{ c.id }}">{{ c.nome }} ({{ c.categoria }})</option>
+  {% endfor %}
+</span>

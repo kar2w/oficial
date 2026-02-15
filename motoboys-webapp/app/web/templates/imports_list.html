@@ -1,0 +1,52 @@
+{% extends "base.html" %}
+{% set nav="imports" %}
+{% set title="Imports" %}
+{% block content %}
+  <header class="pagehead">
+    <h1>Imports</h1>
+    <p class="muted">Últimos imports processados.</p>
+  </header>
+
+  <section class="card">
+    <form method="get" action="/ui/imports" class="form form--row">
+      <label class="field field--inline">
+        <span>Fonte</span>
+        <select name="source" onchange="this.form.submit()">
+          <option value="" {% if not source %}selected{% endif %}>(todas)</option>
+          <option value="SAIPOS" {% if source=="SAIPOS" %}selected{% endif %}>SAIPOS</option>
+          <option value="YOOGA" {% if source=="YOOGA" %}selected{% endif %}>YOOGA</option>
+        </select>
+      </label>
+
+      <div class="actions">
+        <a class="btn btn--ghost" href="/ui/imports/new">Novo import</a>
+      </div>
+    </form>
+
+    <table class="table">
+      <thead>
+        <tr>
+          <th>Data</th>
+          <th>Fonte</th>
+          <th>Arquivo</th>
+          <th>Status</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for it in imports %}
+          <tr>
+            <td class="mono">{{ it.imported_at }}</td>
+            <td>{{ it.source }}</td>
+            <td class="mono">{{ it.filename }}</td>
+            <td class="mono">{{ it.status }}</td>
+            <td><a class="btn btn--small btn--ghost" href="/ui/imports/{{ it.id }}">Detalhes</a></td>
+          </tr>
+        {% endfor %}
+        {% if not imports %}
+          <tr><td colspan="5" class="muted">Sem imports.</td></tr>
+        {% endif %}
+      </tbody>
+    </table>
+  </section>
+{% endblock %}

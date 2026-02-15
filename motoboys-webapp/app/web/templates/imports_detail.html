@@ -1,0 +1,48 @@
+{% extends "base.html" %}
+{% set nav="imports" %}
+{% set title="Import detalhado" %}
+{% block content %}
+  <header class="pagehead">
+    <div>
+      <h1>Import</h1>
+      <p class="muted mono">{{ imp.id }}</p>
+    </div>
+    <div class="actions">
+      <a class="btn btn--ghost" href="/ui/imports">Voltar</a>
+      <a class="btn" href="/ui/pendencias">Pendências</a>
+    </div>
+  </header>
+
+  <section class="card">
+    <div class="form--row">
+      <div class="pill"><span class="muted">Fonte</span><strong>{{ imp.source }}</strong></div>
+      <div class="pill"><span class="muted">Status</span><strong class="mono">{{ imp.status }}</strong></div>
+      <div class="pill mono">{{ imp.imported_at }}</div>
+    </div>
+
+    <div class="card card--inner" style="margin-top:12px;">
+      <div class="muted">Arquivo</div>
+      <div class="mono">{{ imp.filename }}</div>
+    </div>
+
+    <h2>Contagens por status</h2>
+    <table class="table">
+      <thead>
+        <tr><th>Status</th><th class="num">Qtd</th></tr>
+      </thead>
+      <tbody>
+        {% for k, v in imp.counts.items() %}
+          <tr><td class="mono">{{ k }}</td><td class="num mono">{{ v }}</td></tr>
+        {% endfor %}
+        {% if not imp.counts %}
+          <tr><td colspan="2" class="muted">Sem rides nesse import.</td></tr>
+        {% endif %}
+      </tbody>
+    </table>
+
+    {% if imp.meta %}
+      <h2>Meta</h2>
+      <pre class="mono" style="white-space:pre-wrap;">{{ imp.meta | tojson(indent=2) }}</pre>
+    {% endif %}
+  </section>
+{% endblock %}

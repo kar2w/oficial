@@ -1,0 +1,96 @@
+{% extends "base.html" %}
+{% set nav="couriers" %}
+{% set title="Entregadores" %}
+{% block content %}
+  <header class="pagehead">
+    <div>
+      <h1>Entregadores</h1>
+      <p class="muted">Cadastro mínimo para atribuição de pendências e pagamentos.</p>
+    </div>
+  </header>
+
+  <section class="card">
+    <form method="get" action="/ui/couriers" class="form form--row">
+      <label class="field field--inline">
+        <span>Buscar</span>
+        <input name="q" value="{{ q }}" placeholder="nome/alias..." />
+      </label>
+
+      <label class="field field--inline">
+        <span>Categoria</span>
+        <select name="categoria">
+          <option value="" {% if not categoria %}selected{% endif %}>(todas)</option>
+          <option value="SEMANAL" {% if categoria=="SEMANAL" %}selected{% endif %}>SEMANAL</option>
+          <option value="DIARISTA" {% if categoria=="DIARISTA" %}selected{% endif %}>DIARISTA</option>
+        </select>
+      </label>
+
+      <label class="field field--inline">
+        <span>Ativo</span>
+        <select name="active">
+          <option value="true" {% if active %}selected{% endif %}>true</option>
+          <option value="false" {% if active is not none and not active %}selected{% endif %}>false</option>
+        </select>
+      </label>
+
+      <button class="btn btn--ghost" type="submit">Filtrar</button>
+    </form>
+
+    <hr class="sep"/>
+
+    <h2>Novo entregador</h2>
+    <form method="post" action="/ui/couriers" class="form form--row">
+      <label class="field">
+        <span>Nome</span>
+        <input name="nome_resumido" required />
+      </label>
+      <label class="field">
+        <span>Nome completo</span>
+        <input name="nome_completo" />
+      </label>
+      <label class="field">
+        <span>Categoria</span>
+        <select name="categoria">
+          <option value="SEMANAL">SEMANAL</option>
+          <option value="DIARISTA">DIARISTA</option>
+        </select>
+      </label>
+      <button class="btn" type="submit">Criar</button>
+    </form>
+  </section>
+
+  <section class="card">
+    <h2>Lista</h2>
+    <table class="table">
+      <thead>
+        <tr>
+          <th>Nome</th>
+          <th>Categoria</th>
+          <th>Ativo</th>
+          <th>Pagamento</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for c in rows %}
+          <tr>
+            <td>{{ c.nome_resumido }}</td>
+            <td class="mono">{{ c.categoria }}</td>
+            <td class="mono">{{ c.active }}</td>
+            <td class="mono">
+              {% if c.payment.key_type %}
+                {{ c.payment.key_type }}: {{ c.payment.key_value_raw }} {% if c.payment.bank %}({{ c.payment.bank }}){% endif %}
+              {% else %}
+                <span class="muted">—</span>
+              {% endif %}
+            </td>
+            <td><a class="btn btn--small btn--ghost" href="/ui/couriers/{{ c.id }}">Editar</a></td>
+          </tr>
+        {% endfor %}
+        {% if not rows %}
+          <tr><td colspan="5" class="muted">Sem entregadores.</td></tr>
+        {% endif %}
+      </tbody>
+    </table>
+  </section>
+{% endblock %}
