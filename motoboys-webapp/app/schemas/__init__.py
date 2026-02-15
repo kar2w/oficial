@@ -1,48 +1,54 @@
-from datetime import date, datetime
-from typing import Literal
-
 from pydantic import BaseModel, Field
-
+from typing import Literal, Optional, List
 
 class ImportResponse(BaseModel):
     import_id: str
-    source: str
-    filename: str | None = None
+    source: Literal["SAIPOS","YOOGA"]
+    filename: str
     inserted: int
     pendente_atribuicao: int
     pendente_revisao: int
-
+    redirected_closed_week: int = 0
+    week_ids_touched: List[str] = []
 
 class AssignRideBody(BaseModel):
     courier_id: str
-    pay_in_current_week: bool = False
-
+    pay_in_current_week: bool = True
 
 class ResolveYoogaBody(BaseModel):
-    action: str
-    keep_ride_id: str | None = None
+    action: Literal["APPROVE_ALL", "KEEP_ONE"]
+    keep_ride_id: Optional[str] = None
 
+class SeedCourier(BaseModel):
+    nome_exibicao: str
+    nome_completo: Optional[str] = None
+    tipo_contrato: Optional[str] = "semanais"
+    pagamento: Optional[dict] = None
 
 class SeedRequest(BaseModel):
-    items: list[dict] = []
+    entregadores: List[SeedCourier]
 
 
-class CourierCreate(BaseModel):
-    nome_resumido: str
-    nome_completo: str | None = None
-    categoria: str
-    active: bool = True
+# =====================
+# Couriers CRUD (v1.0)
+# =====================
+
+CourierCategoryLiteral = Literal["SEMANAL", "DIARISTA"]
+PaymentKeyTypeLiteral = Literal["CPF", "CNPJ", "TELEFONE", "EMAIL", "ALEATORIA", "OUTRO"]
 
 
-class CourierPatch(BaseModel):
-    nome_resumido: str | None = None
-    nome_completo: str | None = None
-    categoria: str | None = None
-    active: bool | None = None
+class CourierPaymentIn(BaseModel):
+    key_type: Optional[PaymentKeyTypeLiteral] = None
+    key_value_raw: Optional[str] = None
+    bank: Optional[str] = None
+
+
+class CourierPaymentOut(CourierPaymentIn):
+    courier_id: str
 
 
 class CourierAliasCreate(BaseModel):
-    alias_raw: str
+    alias_raw: str = Field(..., min_length=1)
 
 
 class CourierAliasOut(BaseModel):
@@ -52,28 +58,33 @@ class CourierAliasOut(BaseModel):
     alias_norm: str
 
 
-class CourierPaymentIn(BaseModel):
-    key_type: str
-    key_value_raw: str
-    bank: str | None = None
+class CourierCreate(BaseModel):
+    nome_resumido: str = Field(..., min_length=1)
+    nome_completo: Optional[str] = None
+    categoria: CourierCategoryLiteral = "DIARISTA"
+    active: bool = True
 
 
-class CourierPaymentOut(BaseModel):
-    courier_id: str
-    key_type: str
-    key_value_raw: str
-    bank: str | None = None
+class CourierPatch(BaseModel):
+    nome_resumido: Optional[str] = Field(default=None, min_length=1)
+    nome_completo: Optional[str] = None
+    categoria: Optional[CourierCategoryLiteral] = None
+    active: Optional[bool] = None
 
 
 class CourierOut(BaseModel):
     id: str
     nome_resumido: str
-    nome_completo: str | None = None
-    categoria: str
+    nome_completo: Optional[str]
+    categoria: CourierCategoryLiteral
     active: bool
-    payment: CourierPaymentOut | None = None
-    aliases: list[CourierAliasOut] = []
+    payment: Optional[CourierPaymentOut] = None
+    aliases: List[CourierAliasOut] = []
 
+
+# =====================
+# Ledger (extras/vales)
+# =====================
 
 LedgerTypeLiteral = Literal["EXTRA", "VALE"]
 
@@ -81,36 +92,50 @@ LedgerTypeLiteral = Literal["EXTRA", "VALE"]
 class LedgerEntryCreate(BaseModel):
     courier_id: str
     week_id: str
-    effective_date: date
+    effective_date: str  # YYYY-MM-DD
     type: LedgerTypeLiteral
     amount: float = Field(..., gt=0)
-    related_ride_id: str | None = None
-    note: str | None = None
+    related_ride_id: Optional[str] = None
+    note: Optional[str] = None
 
 
 class LedgerEntryOut(BaseModel):
     id: str
     courier_id: str
     week_id: str
-    effective_date: date
+    effective_date: str
     type: LedgerTypeLiteral
     amount: float
-    related_ride_id: str | None = None
-    note: str | None = None
-    created_at: str | datetime | None = None
+    related_ride_id: Optional[str] = None
+    note: Optional[str] = None
+    created_at: str
+
+
+class LedgerCreateOut(BaseModel):
+    ledger_entry: Optional[LedgerEntryOut] = None
+    vale_amount: float = 0.0
+    loan_amount: float = 0.0
+    loan_plan_id: Optional[str] = None
+    loan_n_installments: Optional[int] = None
+
+
+# =====================
+# Week payouts
+# =====================
 
 
 class WeekPayoutPreviewRow(BaseModel):
-    courier_id: str | None = None
-    courier_nome: str | None = None
-    rides_count: int
-    rides_amount: float
+    courier_id: Optional[str] = None
+    courier_nome: Optional[str] = None
+    rides_count: int = 0
+    rides_amount: float = 0.0
     rides_value_raw_amount: float = 0.0
-    extras_amount: float
-    vales_amount: float
-    installments_amount: float
-    net_amount: float
-    pending_count: int
+    extras_amount: float = 0.0
+    vales_amount: float = 0.0
+    installments_amount: float = 0.0
+    net_amount: float = 0.0
+    pending_count: int = 0
+    is_flag_red: bool = False
 
 
 class WeekPayoutSnapshotRow(BaseModel):
@@ -123,5 +148,5 @@ class WeekPayoutSnapshotRow(BaseModel):
     net_amount: float
     pending_count: int
     is_flag_red: bool
-    computed_at: str | datetime
-    paid_at: str | datetime | None = None
+    computed_at: str
+    paid_at: Optional[str] = None

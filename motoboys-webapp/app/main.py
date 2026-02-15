@@ -1,12 +1,15 @@
 import datetime as dt
+from pathlib import Path
 
 from fastapi import Depends, FastAPI, File, Form, HTTPException, Query, Response, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
-from sqlalchemy import text as sa_text
+from fastapi.staticfiles import StaticFiles
+from fastapi.responses import RedirectResponse
+from sqlalchemy import func, text as sa_text
 from sqlalchemy.orm import Session
 
 from app.db import get_db
-from app.models import CourierAlias, CourierPayment
+from app.models import CourierAlias, CourierPayment, Import, Ride
 from app.schemas import (
     AssignRideBody,
     CourierAliasCreate,
@@ -19,6 +22,7 @@ from app.schemas import (
     ImportResponse,
     LedgerEntryCreate,
     LedgerEntryOut,
+    LedgerCreateOut,
     ResolveYoogaBody,
     SeedRequest,
     WeekPayoutPreviewRow,
@@ -32,8 +36,9 @@ from app.services.payouts import close_week, compute_week_payout_preview, get_pa
 from app.services.pendings import assign_ride, list_assignment, list_yooga_groups, resolve_yooga, yooga_group_items
 from app.services.seed import seed_weekly_couriers
 from app.services.utils import read_upload_bytes, sha256_bytes
-from app.services.week_service import get_current_week
+from app.services.week_service import get_current_week, get_open_week_for_date
 from app.settings import settings
+from app.web.router import router as web_router
 
 app = FastAPI(title="Motoboys WebApp API")
 
@@ -44,6 +49,22 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+
+# -------------------------
+# Web UI (Jinja2 + HTMX)
+# -------------------------
+BASE_DIR = Path(__file__).resolve().parent
+STATIC_DIR = BASE_DIR / "web" / "static"
+if STATIC_DIR.exists():
+    app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
+
+app.include_router(web_router)
+
+@app.get("/", include_in_schema=False)
+def root_redirect():
+    return RedirectResponse(url="/ui/imports/new", status_code=302)
 
 
 def _couriers_to_out(db: Session, couriers):
@@ -177,6 +198,7 @@ def week_payout_preview(week_id: str, db: Session = Depends(get_db)):
             installments_amount=float(r.get("installments_amount") or 0),
             net_amount=float(r.get("net_amount") or 0),
             pending_count=int(r.get("pending_count") or 0),
+            is_flag_red=bool(r.get("is_flag_red") or False),
         )
         for r in rows
     ]
@@ -219,7 +241,7 @@ def week_payout_csv(week_id: str, db: Session = Depends(get_db)):
     import io
 
     w = get_week_or_404(db, week_id)
-    if w["status"] in ("CLOSED", "PAID"):
+    if w.status in ("CLOSED", "PAID"):
         rows = get_payout_snapshot(db, week_id)
         header = [
             "courier_nome",
@@ -230,6 +252,7 @@ def week_payout_csv(week_id: str, db: Session = Depends(get_db)):
             "installments_amount",
             "net_amount",
             "pending_count",
+            "is_flag_red",
             "computed_at",
             "paid_at",
         ]
@@ -243,6 +266,7 @@ def week_payout_csv(week_id: str, db: Session = Depends(get_db)):
                 "installments_amount": r["installments_amount"],
                 "net_amount": r["net_amount"],
                 "pending_count": r["pending_count"],
+                "is_flag_red": r.get("is_flag_red"),
                 "computed_at": r.get("computed_at"),
                 "paid_at": r.get("paid_at"),
             }
@@ -260,6 +284,7 @@ def week_payout_csv(week_id: str, db: Session = Depends(get_db)):
             "installments_amount",
             "net_amount",
             "pending_count",
+            "is_flag_red",
         ]
         data_rows = [
             {
@@ -272,6 +297,7 @@ def week_payout_csv(week_id: str, db: Session = Depends(get_db)):
                 "installments_amount": r.get("installments_amount"),
                 "net_amount": r.get("net_amount"),
                 "pending_count": r.get("pending_count"),
+                "is_flag_red": r.get("is_flag_red"),
             }
             for r in rows
         ]
@@ -282,7 +308,7 @@ def week_payout_csv(week_id: str, db: Session = Depends(get_db)):
     for row in data_rows:
         wr.writerow(row)
 
-    filename = f"week_{w['start_date']}_to_{w['end_date']}_payouts.csv"
+    filename = f"week_{w.start_date}_to_{w.end_date}_payouts.csv"
     return Response(
         content=buf.getvalue(),
         media_type="text/csv",
@@ -295,7 +321,7 @@ def week_ledger(week_id: str, courier_id: str | None = Query(default=None), db: 
     return list_week_ledger(db, week_id=week_id, courier_id=courier_id)
 
 
-@app.post("/ledger", response_model=LedgerEntryOut)
+@app.post("/ledger", response_model=LedgerCreateOut)
 def ledger_create(body: LedgerEntryCreate, db: Session = Depends(get_db)):
     return create_ledger_entry(
         db,
@@ -324,9 +350,9 @@ async def do_import(source: str = Form(...), file: UploadFile = File(...), db: S
     file_hash = sha256_bytes(data)
 
     if source == "SAIPOS":
-        import_id, inserted, pend_assign, pend_review = import_saipos(db, data, file.filename, file_hash)
+        import_id, inserted, pend_assign, pend_review, redirected_closed_week, week_ids_touched = import_saipos(db, data, file.filename, file_hash)
     else:
-        import_id, inserted, pend_assign, pend_review = import_yooga(db, data, file.filename, file_hash)
+        import_id, inserted, pend_assign, pend_review, redirected_closed_week, week_ids_touched = import_yooga(db, data, file.filename, file_hash)
 
     return ImportResponse(
         import_id=import_id,
@@ -335,12 +361,74 @@ async def do_import(source: str = Form(...), file: UploadFile = File(...), db: S
         inserted=inserted,
         pendente_atribuicao=pend_assign,
         pendente_revisao=pend_review,
+        redirected_closed_week=redirected_closed_week,
+        week_ids_touched=week_ids_touched,
     )
 
 
+@app.get("/imports")
+def list_imports(
+    source: str | None = Query(default=None),
+    after: str | None = Query(default=None),
+    before: str | None = Query(default=None),
+    limit: int = Query(default=50, ge=1, le=200),
+    offset: int = Query(default=0, ge=0),
+    db: Session = Depends(get_db),
+):
+    q = db.query(Import)
+    if source:
+        q = q.filter(Import.source == source.upper().strip())
+    if after:
+        q = q.filter(Import.imported_at >= after)
+    if before:
+        q = q.filter(Import.imported_at <= before)
+
+    rows = q.order_by(Import.imported_at.desc()).offset(offset).limit(limit).all()
+    return [
+        {
+            "id": str(i.id),
+            "source": i.source,
+            "filename": i.filename,
+            "imported_at": i.imported_at.isoformat() if i.imported_at else None,
+            "meta": i.meta or {},
+            "status": i.status,
+        }
+        for i in rows
+    ]
+
+
+@app.get("/imports/{import_id}")
+def get_import_detail(import_id: str, db: Session = Depends(get_db)):
+    imp = db.query(Import).filter(Import.id == import_id).first()
+    if not imp:
+        raise HTTPException(status_code=404, detail="import not found")
+
+    counts = dict(db.query(Ride.status, func.count(Ride.id)).filter(Ride.import_id == imp.id).group_by(Ride.status).all())
+    return {
+        "id": str(imp.id),
+        "source": imp.source,
+        "filename": imp.filename,
+        "imported_at": imp.imported_at.isoformat() if imp.imported_at else None,
+        "meta": imp.meta or {},
+        "status": imp.status,
+        "counts": {
+            "inserted_ok": int(counts.get("OK", 0)),
+            "pending_assignment": int(counts.get("PENDENTE_ATRIBUICAO", 0)),
+            "pending_review": int(counts.get("PENDENTE_REVISAO", 0)),
+            "discarded": int(counts.get("DESCARTADO", 0)),
+        },
+    }
+
+
 @app.get("/pendings/assignment")
-def pendings_assignment(db: Session = Depends(get_db)):
-    rides = list_assignment(db)
+def pendings_assignment(
+    week_id: str | None = Query(default=None),
+    source: str | None = Query(default=None),
+    db: Session = Depends(get_db),
+):
+    if not week_id:
+        week_id = str(get_open_week_for_date(db, dt.date.today()).id)
+    rides = list_assignment(db, week_id=week_id, source=source)
     return [
         {
             "id": str(r.id),
@@ -364,8 +452,14 @@ def pendings_assign(ride_id: str, body: AssignRideBody, db: Session = Depends(ge
 
 
 @app.get("/pendings/yooga")
-def pendings_yooga(db: Session = Depends(get_db)):
-    return list_yooga_groups(db)
+def pendings_yooga(
+    week_id: str | None = Query(default=None),
+    source: str | None = Query(default=None),
+    db: Session = Depends(get_db),
+):
+    if not week_id:
+        week_id = str(get_open_week_for_date(db, dt.date.today()).id)
+    return list_yooga_groups(db, week_id=week_id, source=source)
 
 
 @app.get("/pendings/yooga/{group_id}")
@@ -393,6 +487,136 @@ def pendings_yooga_resolve(group_id: str, body: ResolveYoogaBody, db: Session = 
     return resolve_yooga(db, group_id=group_id, action=body.action, keep_ride_id=body.keep_ride_id)
 
 
+@app.get("/rides")
+def list_rides(
+    week_id: str | None = Query(default=None),
+    courier_id: str | None = Query(default=None),
+    status: str | None = Query(default=None),
+    date: str | None = Query(default=None),
+    limit: int = Query(default=100, ge=1, le=500),
+    offset: int = Query(default=0, ge=0),
+    db: Session = Depends(get_db),
+):
+    q = db.query(Ride)
+    if week_id:
+        q = q.filter(Ride.week_id == week_id)
+    if courier_id:
+        q = q.filter(Ride.courier_id == courier_id)
+    if status:
+        q = q.filter(Ride.status == status)
+    if date:
+        q = q.filter(Ride.order_date == date)
+
+    rows = q.order_by(Ride.order_dt.desc()).offset(offset).limit(limit).all()
+    return [
+        {
+            "id": str(r.id),
+            "source": r.source,
+            "import_id": str(r.import_id),
+            "order_dt": r.order_dt.isoformat(),
+            "delivery_dt": r.delivery_dt.isoformat() if r.delivery_dt else None,
+            "order_date": str(r.order_date),
+            "week_id": str(r.week_id),
+            "paid_in_week_id": str(r.paid_in_week_id) if r.paid_in_week_id else None,
+            "courier_id": str(r.courier_id) if r.courier_id else None,
+            "courier_name_raw": r.courier_name_raw,
+            "value_raw": float(r.value_raw),
+            "fee_type": int(r.fee_type),
+            "status": r.status,
+            "pending_reason": r.pending_reason,
+        }
+        for r in rows
+    ]
+
+
+@app.get("/weeks/{week_id}/couriers/{courier_id}/breakdown")
+def week_courier_breakdown(week_id: str, courier_id: str, db: Session = Depends(get_db)):
+    rides = db.execute(
+        sa_text(
+            """
+            SELECT id, source, order_dt, value_raw, fee_type, status, week_id, paid_in_week_id
+            FROM rides
+            WHERE courier_id = :courier_id
+              AND ((week_id = :week_id AND paid_in_week_id IS NULL) OR paid_in_week_id = :week_id)
+              AND (is_cancelled IS NULL OR is_cancelled = false)
+            ORDER BY order_dt ASC
+            """
+        ),
+        {"courier_id": courier_id, "week_id": week_id},
+    ).mappings().all()
+
+    ledger_entries = db.execute(
+        sa_text(
+            """
+            SELECT id, effective_date, type, amount, note
+            FROM ledger_entries
+            WHERE courier_id = :courier_id AND week_id = :week_id
+            ORDER BY effective_date ASC
+            """
+        ),
+        {"courier_id": courier_id, "week_id": week_id},
+    ).mappings().all()
+
+    week = get_week_or_404(db, week_id)
+    installments_due = db.execute(
+        sa_text(
+            """
+            SELECT li.id, li.installment_no, li.due_closing_seq, li.amount, li.paid_amount, li.status
+            FROM loan_installments li
+            JOIN loan_plans lp ON lp.id = li.plan_id
+            WHERE lp.courier_id = :courier_id
+              AND lp.status = 'ACTIVE'
+              AND li.status IN ('DUE','ROLLED','PARTIAL')
+              AND li.due_closing_seq <= :closing_seq
+            ORDER BY li.due_closing_seq ASC, li.installment_no ASC
+            """
+        ),
+        {"courier_id": courier_id, "closing_seq": int(week.closing_seq)},
+    ).mappings().all()
+
+    rides_amount = float(sum(float(r["fee_type"] or 0) for r in rides))
+    extras_amount = float(sum(float(l["amount"] or 0) for l in ledger_entries if l["type"] == "EXTRA"))
+    vales_amount = float(sum(float(l["amount"] or 0) for l in ledger_entries if l["type"] == "VALE"))
+    installments_due_amount = float(sum(max(0.0, float(i["amount"] or 0) - float(i["paid_amount"] or 0)) for i in installments_due))
+    pre_net = rides_amount + extras_amount - vales_amount
+    installments_applied = max(0.0, min(pre_net, installments_due_amount))
+
+    return {
+        "week_id": week_id,
+        "courier_id": courier_id,
+        "rides": [dict(r) for r in rides],
+        "ledger_entries": [dict(l) for l in ledger_entries],
+        "installments_due": [
+            {**dict(i), "remaining_amount": max(0.0, float(i["amount"] or 0) - float(i["paid_amount"] or 0))} for i in installments_due
+        ],
+        "preview": {
+            "rides_amount": rides_amount,
+            "extras_amount": extras_amount,
+            "vales_amount": vales_amount,
+            "installments_due_amount": installments_due_amount,
+            "installments_applied_amount": installments_applied,
+            "net_amount": pre_net - installments_applied,
+        },
+    }
+
+
 @app.post("/seed/weekly-couriers")
 def seed_weekly(body: SeedRequest, db: Session = Depends(get_db)):
     return seed_weekly_couriers(db, payload=body.model_dump())
+
+
+@app.post("/seed/weekly-couriers/from-file")
+def seed_weekly_from_file(db: Session = Depends(get_db)):
+    import json
+    from pathlib import Path
+
+    path = Path(settings.WEEKLY_COURIERS_JSON_PATH)
+    if not path.exists():
+        raise HTTPException(status_code=404, detail=f"Seed file not found: {path}")
+
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    if isinstance(payload, list):
+        payload = {"entregadores": payload}
+    if not isinstance(payload, dict):
+        raise HTTPException(status_code=400, detail="Invalid weekly couriers file format")
+    return seed_weekly_couriers(db, payload=payload)
