@@ -165,11 +165,26 @@ def create_ledger_entry(
 
 
 def delete_ledger_entry(db: Session, ledger_id: str):
-    deleted = db.execute(
-        sa_text("DELETE FROM ledger_entries WHERE id::text = :ledger_id RETURNING id"),
+    entry = db.execute(
+        sa_text(
+            """
+            SELECT le.id, w.status
+            FROM ledger_entries le
+            JOIN weeks w ON w.id = le.week_id
+            WHERE le.id::text = :ledger_id
+            """
+        ),
         {"ledger_id": ledger_id},
-    ).first()
-    if not deleted:
+    ).mappings().first()
+    if not entry:
         raise HTTPException(status_code=404, detail="ledger entry not found")
+
+    if entry["status"] != "OPEN":
+        raise HTTPException(status_code=409, detail={"error": "WEEK_NOT_OPEN", "status": entry["status"]})
+
+    db.execute(
+        sa_text("DELETE FROM ledger_entries WHERE id = :ledger_id"),
+        {"ledger_id": entry["id"]},
+    )
     db.commit()
     return {"ok": True}
